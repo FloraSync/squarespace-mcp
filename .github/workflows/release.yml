@@ -4,9 +4,15 @@ on:
   push:
     tags:
       - v*
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to complete
+        required: true
+        type: string
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ inputs.tag || github.ref }}
   cancel-in-progress: false
 
 permissions:
@@ -20,9 +26,12 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.package.outputs.version }}
+      release_tag: ${{ steps.package.outputs.release_tag }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.tag || github.ref }}
 
       - name: Setup Node 24
         uses: actions/setup-node@v6
@@ -41,9 +50,11 @@ jobs:
         id: package
         run: |
           VERSION="$(node -p 'require("./package.json").version')"
-          test "${GITHUB_REF_NAME}" = "v${VERSION}"
+          RELEASE_TAG="${{ inputs.tag || github.ref_name }}"
+          test "${RELEASE_TAG}" = "v${VERSION}"
           test "$(node -p 'require("./server.json").version')" = "${VERSION}"
           echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
+          echo "release_tag=${RELEASE_TAG}" >> "${GITHUB_OUTPUT}"
 
       - name: Verify release candidate
         run: npm run release:dry
@@ -55,9 +66,11 @@ jobs:
         id: registry
         run: |
           PACKAGE_NAME="$(node -p 'require("./package.json").name')"
+          PACKAGE_PATH="${PACKAGE_NAME/\//%2F}"
           VERSION="${{ steps.package.outputs.version }}"
-          if PUBLISHED_GIT_HEAD="$(npm view "${PACKAGE_NAME}@${VERSION}" gitHead 2>/dev/null)"; then
-            test "${PUBLISHED_GIT_HEAD}" = "${GITHUB_SHA}"
+          if METADATA="$(curl --fail --silent --show-error "https://registry.npmjs.org/${PACKAGE_PATH}/${VERSION}" 2>/dev/null)"; then
+            PUBLISHED_GIT_HEAD="$(printf '%s' "${METADATA}" | node -e "let value=''; process.stdin.on('data', chunk => value += chunk); process.stdin.on('end', () => console.log(JSON.parse(value).gitHead ?? ''))")"
+            test "${PUBLISHED_GIT_HEAD}" = "$(git rev-parse HEAD)"
             echo "published=true" >> "${GITHUB_OUTPUT}"
           else
             echo "published=false" >> "${GITHUB_OUTPUT}"
@@ -76,6 +89,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.publish-npm.outputs.release_tag }}
 
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v4
@@ -100,4 +115,4 @@ jobs:
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release create "${GITHUB_REF_NAME}" --generate-notes --verify-tag
+        run: gh release create "${{ needs.publish-npm.outputs.release_tag }}" --generate-notes --verify-tag
