@@ -1,51 +1,85 @@
 {
-  "name": "@mcpengine/squarespace-server",
-  "version": "1.0.0",
-  "description": "Complete MCP server for Squarespace website builder and ecommerce platform",
+  "name": "@florasync/squarespace-mcp",
+  "version": "0.1.0",
+  "description": "Squarespace Commerce MCP server for Gemini Spark, Gemini CLI, and other MCP clients.",
   "type": "module",
-  "main": "dist/main.js",
+  "main": "./dist/main.js",
   "bin": {
     "squarespace-mcp": "./dist/main.js"
   },
+  "files": [
+    "dist",
+    "CHANGELOG.md",
+    "LICENSE",
+    "README.md",
+    "SECURITY.md",
+    "server.json"
+  ],
+  "mcpName": "io.github.florasync/squarespace",
   "scripts": {
-    "build": "tsc && chmod +x dist/main.js",
-    "dev": "tsc --watch",
-    "start": "node dist/main.js",
-    "prepublishOnly": "npm run build",
-    "type-check": "tsc --noEmit"
+    "sync:api": "node scripts/sync-openapi.mjs && prettier --write src/generated/operations.ts",
+    "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
+    "build": "npm run clean && tsc -p tsconfig.build.json && node -e \"require('node:fs').chmodSync('dist/main.js', 0o755)\"",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "prepack": "npm run build",
+    "pack:dry": "npm pack --dry-run",
+    "release:dry": "npm run typecheck && npm run format:check && npm run lint && npm run test:coverage && npm run build && npm pack --dry-run"
   },
   "keywords": [
     "mcp",
+    "model-context-protocol",
     "squarespace",
-    "ecommerce",
-    "website-builder",
-    "api",
+    "gemini",
+    "gemini-spark",
     "commerce",
-    "blog",
-    "cms"
+    "ecommerce"
   ],
-  "author": "MCP Engine",
+  "author": "FloraSync",
   "license": "MIT",
-  "dependencies": {
-    "@modelcontextprotocol/sdk": "^0.6.0",
-    "axios": "^1.6.7"
-  },
-  "devDependencies": {
-    "@types/node": "^20.11.17",
-    "@types/react": "^18.2.55",
-    "@types/react-dom": "^18.2.19",
-    "@vitejs/plugin-react": "^4.2.1",
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0",
-    "typescript": "^5.3.3",
-    "vite": "^5.1.0"
-  },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/BusyBee3333/mcpengine.git",
-    "directory": "servers/squarespace"
+    "url": "git+https://github.com/FloraSync/squarespace-mcp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/FloraSync/squarespace-mcp/issues"
+  },
+  "homepage": "https://github.com/FloraSync/squarespace-mcp#readme",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "ajv": "^8.17.1",
+    "ajv-formats": "^3.0.1",
+    "express": "^5.2.1",
+    "express-rate-limit": "^8.1.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.1",
+    "@types/express": "^5.0.6",
+    "@types/node": "^20.19.0",
+    "@types/supertest": "^6.0.3",
+    "@vitest/coverage-v8": "^4.1.10",
+    "eslint": "^9.39.1",
+    "globals": "^16.5.0",
+    "prettier": "^3.6.2",
+    "supertest": "^7.1.4",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.50.0",
+    "vitest": "^4.1.10"
+  },
+  "overrides": {
+    "@hono/node-server": "^2.0.5",
+    "form-data": "^4.0.6",
+    "minimatch": "^10.2.1"
   }
 }
