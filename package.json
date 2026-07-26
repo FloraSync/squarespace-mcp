@@ -6,7 +6,7 @@
   "packageManager": "npm@11.16.0",
   "main": "./dist/main.js",
   "bin": {
-    "squarespace-mcp": "./dist/main.js"
+    "squarespace-mcp": "dist/main.js"
   },
   "files": [
     "dist",

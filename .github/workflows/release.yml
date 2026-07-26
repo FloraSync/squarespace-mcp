@@ -51,7 +51,20 @@ jobs:
       - name: Audit production dependencies
         run: npm audit --omit=dev --audit-level=high
 
+      - name: Check for an existing identical publication
+        id: registry
+        run: |
+          PACKAGE_NAME="$(node -p 'require("./package.json").name')"
+          VERSION="${{ steps.package.outputs.version }}"
+          if PUBLISHED_GIT_HEAD="$(npm view "${PACKAGE_NAME}@${VERSION}" gitHead 2>/dev/null)"; then
+            test "${PUBLISHED_GIT_HEAD}" = "${GITHUB_SHA}"
+            echo "published=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "published=false" >> "${GITHUB_OUTPUT}"
+          fi
+
       - name: Publish to npm
+        if: steps.registry.outputs.published != 'true'
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: npm publish --access public --provenance
