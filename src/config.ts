@@ -49,9 +49,9 @@ export function parseConfig(argv: string[], environment: NodeJS.ProcessEnv): Cli
 
   const readOnly = values['read-write'] ? false : parseReadOnly(environment.SQUARESPACE_MCP_READ_ONLY);
   const apiBaseUrl = environment.SQUARESPACE_API_BASE_URL;
-  const authMode = parseAuthMode(environment.AUTHMODE);
 
   if (values.http) {
+    const authMode = parseAuthMode(environment.AUTHMODE);
     const port = parsePort(values.port ?? environment.PORT ?? '3000');
     const publicUrl = values['public-url'] ?? environment.MCP_PUBLIC_URL ?? `http://localhost:${port}/mcp`;
     const mcpApiKey = environment.MCPAPIKEY;
