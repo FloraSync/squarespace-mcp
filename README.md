@@ -5,7 +5,7 @@
 
 An MCP server for the current Squarespace Commerce APIs, built for both:
 
-- **Gemini Spark and other web clients** through a hosted HTTPS Streamable HTTP endpoint with API-key authentication, OAuth 2.1 discovery, Dynamic Client Registration (DCR), PKCE, and encrypted credential storage.
+- **Gemini Spark and other web clients** through a hosted HTTPS Streamable HTTP endpoint with API-key authentication and encrypted credential storage.
 - **Gemini CLI, Claude Desktop, Codex, and local clients** through an npm-installed stdio executable.
 
 The server exposes **52 operations generated from Squarespace's official OpenAPI schema**. It is read-only by default and never logs Squarespace credentials.
