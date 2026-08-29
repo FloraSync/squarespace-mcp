@@ -32,11 +32,13 @@ export type HttpTransportOptions = {
   fetchImplementation?: FetchImplementation;
 };
 
+type HttpAuthMode = AuthMode | 'oauth';
+
 export function createHttpApp(options: HttpTransportOptions) {
   const endpointUrl = normalizeMcpUrl(options.publicUrl);
   const issuerUrl = new URL(endpointUrl.origin);
   const app = createMcpExpressApp({ host: '0.0.0.0' });
-  const authMode = options.authMode ?? 'oauth';
+  const authMode: HttpAuthMode = options.authMode ?? 'oauth';
   let provider: SquarespaceOAuthProvider | undefined;
   let bearerAuth: RequestHandler;
 

@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, hkdfSync, randomBytes, timingSafeEqual } from 'node:crypto';
+import { createCipheriv, createDecipheriv, createHmac, hkdfSync, randomBytes, timingSafeEqual } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 
@@ -28,6 +28,7 @@ const IV_BYTES = 12;
 const AUTH_TAG_BYTES = 16;
 const KEY_DERIVATION_SALT = Buffer.from('florasync/squarespace-mcp/oauth-session/v1', 'utf8');
 const KEY_DERIVATION_INFO = Buffer.from('aes-256-gcm', 'utf8');
+const CONSTANT_TIME_KEY = randomBytes(32);
 
 export const AUTH_SCHEMA = `
 CREATE TABLE IF NOT EXISTS apikeys (
@@ -240,12 +241,7 @@ export function openApiKeyStore(options: {
 }
 
 export function constantTimeEqual(actual: string, expected: string): boolean {
-  const actualBytes = Buffer.from(actual, 'utf8');
-  const expectedBytes = Buffer.from(expected, 'utf8');
-  const length = Math.max(actualBytes.length, expectedBytes.length);
-  const actualPadded = Buffer.alloc(length);
-  const expectedPadded = Buffer.alloc(length);
-  actualBytes.copy(actualPadded);
-  expectedBytes.copy(expectedPadded);
-  return timingSafeEqual(actualPadded, expectedPadded) && actualBytes.length === expectedBytes.length;
+  const actualDigest = createHmac('sha256', CONSTANT_TIME_KEY).update(actual, 'utf8').digest();
+  const expectedDigest = createHmac('sha256', CONSTANT_TIME_KEY).update(expected, 'utf8').digest();
+  return timingSafeEqual(actualDigest, expectedDigest);
 }
