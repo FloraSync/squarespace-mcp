@@ -207,10 +207,14 @@ export function createInsecureVerifier(expected: string): (token: string) => boo
   return (token) => constantTimeEqual(token, expected);
 }
 
+const APIKEY_ID_HMAC_KEY = Buffer.from('florasync/squarespace-mcp/apikey-id/v1', 'utf8');
+
 export function apiKeyId(token: string): string {
   const separator = token.indexOf('.');
   if (separator > 0 && separator <= 128) return token.slice(0, separator);
-  return 'bootstrap';
+  // Derive an unguessable, stable ID for dotless tokens so attackers cannot
+  // force a bcrypt comparison by sending arbitrary dotless bearer values.
+  return createHmac('sha256', APIKEY_ID_HMAC_KEY).update(token, 'utf8').digest('hex').slice(0, 32);
 }
 
 export function generateApiKey(): string {

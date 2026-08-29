@@ -105,7 +105,9 @@ describe('encrypted OAuth session storage', () => {
   });
 
   it('derives stable IDs for raw bootstrap keys', () => {
-    expect(apiKeyId('raw-bootstrap-key')).toBe('bootstrap');
+    // Dotless tokens use an HMAC-derived ID so attackers cannot force a bcrypt
+    // comparison by sending arbitrary dotless bearer values to the /mcp endpoint.
+    expect(apiKeyId('raw-bootstrap-key')).toBe('5ee3a3d3c7b51ebead5b0c040a775ef2');
     expect(apiKeyId('sklive123.secret')).toBe('sklive123');
   });
 });
