@@ -12,6 +12,7 @@ import {
   createInsecureVerifier,
   OAuthSessionStore,
   openApiKeyStore,
+  apiKeyId,
   type ApiKeyRecord,
   type AuthMode,
   type ApiKeyStore,
@@ -131,9 +132,8 @@ export function createHttpApp(options: HttpTransportOptions) {
     const credential =
       authMode === 'oauth'
         ? provider?.credentialFromAccessToken(auth?.token ?? '')
-        : (sessionStore?.get(apiKey?.id ?? (bearerToken ? apiKeyIdForSession(bearerToken) : ''))?.accessToken ??
-          options.credential ??
-          bearerToken);
+        : (sessionStore?.get(apiKey?.id ?? (bearerToken ? apiKeyId(bearerToken) : ''))?.accessToken ??
+          options.credential);
     if (!credential) {
       response.status(503).json({ error: 'No Squarespace credential is configured for this API key.' });
       return;
@@ -183,11 +183,6 @@ export function createHttpApp(options: HttpTransportOptions) {
   });
 
   return app;
-}
-
-function apiKeyIdForSession(token: string): string {
-  const separator = token.indexOf('.');
-  return separator > 0 ? token.slice(0, separator) : '';
 }
 
 export async function startHttpTransport(

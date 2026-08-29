@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, createHash, randomBytes, timingSafeEqual } from 'node:crypto';
+import { createCipheriv, createDecipheriv, hkdfSync, randomBytes, timingSafeEqual } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 
@@ -23,8 +23,11 @@ export type OAuthSession = {
 };
 
 const BCRYPT_ROUNDS = 12;
+const ENCRYPTION_KEY_BYTES = 32;
 const IV_BYTES = 12;
 const AUTH_TAG_BYTES = 16;
+const KEY_DERIVATION_SALT = Buffer.from('florasync/squarespace-mcp/oauth-session/v1', 'utf8');
+const KEY_DERIVATION_INFO = Buffer.from('aes-256-gcm', 'utf8');
 
 export const AUTH_SCHEMA = `
 CREATE TABLE IF NOT EXISTS apikeys (
@@ -153,7 +156,15 @@ export class SecretCodec {
     if (masterEncryptionKey.length < 32) {
       throw new Error('MASTERENCRYPTIONKEY must contain at least 32 characters.');
     }
-    this.key = createHash('sha256').update(masterEncryptionKey, 'utf8').digest();
+    this.key = Buffer.from(
+      hkdfSync(
+        'sha256',
+        Buffer.from(masterEncryptionKey, 'utf8'),
+        KEY_DERIVATION_SALT,
+        KEY_DERIVATION_INFO,
+        ENCRYPTION_KEY_BYTES,
+      ),
+    );
   }
 
   encrypt(value: string): string {

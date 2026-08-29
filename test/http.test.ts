@@ -208,6 +208,18 @@ describe('remote HTTP and Gemini Spark OAuth contract', () => {
       })
       .expect(200);
     expect(new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get('authorization')).toBe(bearer(developerKey));
+
+    const missingCredentialApp = createHttpApp({
+      publicUrl,
+      authMode: 'insecure-env',
+      mcpApiKey: 'mcp-development-key',
+      readOnly: true,
+    });
+    await request(missingCredentialApp)
+      .post('/mcp')
+      .set('Authorization', bearer('mcp-development-key'))
+      .send({ jsonrpc: '2.0', id: 1, method: 'tools/list' })
+      .expect(503);
   });
 
   it('supports bcrypt API keys in secure-sqlite mode', async () => {
