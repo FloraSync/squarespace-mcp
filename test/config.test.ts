@@ -22,25 +22,43 @@ describe('CLI configuration', () => {
     ).toMatchObject({ transport: 'stdio', credential: 'oauth-token', readOnly: false });
   });
 
-  it('supports read-write HTTP configuration', () => {
+  it('supports read-write insecure-env HTTP configuration', () => {
     expect(
       parseConfig(['--http', '--read-write', '--port', '8080'], {
-        MCP_TOKEN_SECRET: 'x'.repeat(32),
+        AUTHMODE: 'insecure-env',
+        MCPAPIKEY: 'developer-key',
         MCP_PUBLIC_URL: 'https://mcp.example.com/mcp',
       }),
     ).toMatchObject({
       transport: 'http',
+      authMode: 'insecure-env',
       port: 8080,
       readOnly: false,
       publicUrl: 'https://mcp.example.com/mcp',
     });
   });
 
-  it('requires a token secret and validates the port in HTTP mode', () => {
-    expect(() => parseConfig(['--http'], {})).toThrow(/MCP_TOKEN_SECRET/);
-    expect(() => parseConfig(['--http', '--port', '70000'], { MCP_TOKEN_SECRET: 'x'.repeat(32) })).toThrow(
-      /Invalid port/,
-    );
+  it('defaults to insecure-env and validates the HTTP configuration', () => {
+    expect(() => parseConfig(['--http'], {})).toThrow(/MCPAPIKEY/);
+    expect(() => parseConfig(['--http', '--port', '70000'], { MCPAPIKEY: 'developer-key' })).toThrow(/Invalid port/);
+    expect(() => parseConfig(['--http'], { AUTHMODE: 'unsupported', MCPAPIKEY: 'developer-key' })).toThrow(/AUTHMODE/);
+  });
+
+  it('supports secure-sqlite configuration without exposing bootstrap values', () => {
+    expect(
+      parseConfig(['--http'], {
+        AUTHMODE: 'secure-sqlite',
+        SQLITEDBPATH: '/tmp/florasync-auth.db',
+        INITAPIKEY: 'initial-key',
+        MASTERENCRYPTIONKEY: 'master-key',
+      }),
+    ).toMatchObject({
+      transport: 'http',
+      authMode: 'secure-sqlite',
+      databasePath: '/tmp/florasync-auth.db',
+      initApiKey: 'initial-key',
+      masterEncryptionKey: 'master-key',
+    });
   });
 
   it('handles help and version without credentials', () => {

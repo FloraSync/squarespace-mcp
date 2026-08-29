@@ -1,5 +1,7 @@
 import { parseArgs } from 'node:util';
 
+import type { AuthMode } from './auth/api-key-store.js';
+
 export type CliConfig =
   | { action: 'help' }
   | { action: 'version' }
@@ -13,8 +15,14 @@ export type CliConfig =
   | {
       action: 'run';
       transport: 'http';
+      authMode: AuthMode;
       publicUrl: string;
-      tokenSecret: string;
+      tokenSecret?: string;
+      mcpApiKey?: string;
+      databasePath: string;
+      initApiKey?: string;
+      masterEncryptionKey?: string;
+      credential?: string;
       host: string;
       port: number;
       readOnly: boolean;
@@ -41,19 +49,26 @@ export function parseConfig(argv: string[], environment: NodeJS.ProcessEnv): Cli
 
   const readOnly = values['read-write'] ? false : parseReadOnly(environment.SQUARESPACE_MCP_READ_ONLY);
   const apiBaseUrl = environment.SQUARESPACE_API_BASE_URL;
+  const authMode = parseAuthMode(environment.AUTHMODE);
 
   if (values.http) {
     const port = parsePort(values.port ?? environment.PORT ?? '3000');
     const publicUrl = values['public-url'] ?? environment.MCP_PUBLIC_URL ?? `http://localhost:${port}/mcp`;
-    const tokenSecret = environment.MCP_TOKEN_SECRET;
-    if (!tokenSecret) {
-      throw new Error('MCP_TOKEN_SECRET is required in HTTP mode. Generate one with: openssl rand -base64 32');
+    const mcpApiKey = environment.MCPAPIKEY;
+    if (authMode === 'insecure-env' && !mcpApiKey) {
+      throw new Error('MCPAPIKEY is required for insecure-env HTTP mode.');
     }
     return {
       action: 'run',
       transport: 'http',
+      authMode,
       publicUrl,
-      tokenSecret,
+      tokenSecret: environment.MCP_TOKEN_SECRET,
+      mcpApiKey,
+      databasePath: environment.SQLITEDBPATH ?? '/data/squarespace-mcp.sqlite',
+      initApiKey: environment.INITAPIKEY,
+      masterEncryptionKey: environment.MASTERENCRYPTIONKEY,
+      credential: environment.SQUARESPACE_API_KEY ?? environment.SQUARESPACE_ACCESS_TOKEN,
       host: values.host ?? environment.HOST ?? '0.0.0.0',
       port,
       readOnly,
@@ -66,6 +81,12 @@ export function parseConfig(argv: string[], environment: NodeJS.ProcessEnv): Cli
     throw new Error('Set SQUARESPACE_API_KEY (or SQUARESPACE_ACCESS_TOKEN) before starting the stdio server.');
   }
   return { action: 'run', transport: 'stdio', credential, readOnly, apiBaseUrl };
+}
+
+function parseAuthMode(value: string | undefined): AuthMode {
+  if (value === undefined || value === '') return 'insecure-env';
+  if (value === 'insecure-env' || value === 'secure-sqlite') return value;
+  throw new Error(`AUTHMODE must be insecure-env or secure-sqlite, not ${value}.`);
 }
 
 function parseReadOnly(value: string | undefined): boolean {
