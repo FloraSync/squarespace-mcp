@@ -1,8 +1,10 @@
 import { createHash } from 'node:crypto';
+import { DatabaseSync } from 'node:sqlite';
 
 import request from 'supertest';
 import { describe, expect, it, vi } from 'vitest';
 
+import { ApiKeyStore } from '../src/auth/api-key-store.js';
 import { createHttpApp, startHttpTransport } from '../src/transports/http.js';
 
 const publicUrl = 'http://localhost/mcp';
@@ -176,6 +178,93 @@ describe('remote HTTP and Gemini Spark OAuth contract', () => {
     await request(app).post('/oauth/approve').type('form').send({ request: 'expired', credential: 'key' }).expect(400);
   });
 
+  it('supports non-OAuth Squarespace developer API keys in insecure-env mode', async () => {
+    const developerKey = 'squarespace-developer-key';
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ products: [] }));
+    const app = createHttpApp({
+      publicUrl,
+      authMode: 'insecure-env',
+      mcpApiKey: 'mcp-development-key',
+      credential: developerKey,
+      readOnly: true,
+      fetchImplementation: fetchMock,
+    });
+
+    await request(app).post('/mcp').send({ jsonrpc: '2.0', id: 1, method: 'tools/list' }).expect(401);
+    await request(app)
+      .post('/mcp')
+      .set('Authorization', bearer('wrong-key'))
+      .send({ jsonrpc: '2.0', id: 1, method: 'tools/list' })
+      .expect(401);
+    await request(app)
+      .post('/mcp')
+      .set('Authorization', bearer('mcp-development-key'))
+      .set('Accept', 'application/json, text/event-stream')
+      .send({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'tools/call',
+        params: { name: 'squarespace_get_products', arguments: {} },
+      })
+      .expect(200);
+    expect(new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get('authorization')).toBe(bearer(developerKey));
+
+    const missingCredentialApp = createHttpApp({
+      publicUrl,
+      authMode: 'insecure-env',
+      mcpApiKey: 'mcp-development-key',
+      readOnly: true,
+    });
+    await request(missingCredentialApp)
+      .post('/mcp')
+      .set('Authorization', bearer('mcp-development-key'))
+      .send({ jsonrpc: '2.0', id: 1, method: 'tools/list' })
+      .expect(503);
+  });
+
+  it('supports bcrypt API keys in secure-sqlite mode', async () => {
+    const database = new DatabaseSync(':memory:');
+    const store = new ApiKeyStore(database);
+    const apiKey = 'sklive-secure-id.secure-secret';
+    store.createApiKey('cloud admin', apiKey);
+    const app = createHttpApp({
+      publicUrl,
+      authMode: 'secure-sqlite',
+      apiKeyStore: store,
+      credential: 'squarespace-developer-key',
+      readOnly: true,
+    });
+
+    await request(app)
+      .post('/mcp')
+      .set('Authorization', bearer('wrong-key'))
+      .send({ jsonrpc: '2.0', id: 1, method: 'tools/list' })
+      .expect(401);
+    await request(app)
+      .post('/mcp')
+      .set('Authorization', bearer(apiKey))
+      .set('Accept', 'application/json, text/event-stream')
+      .send({ jsonrpc: '2.0', id: 1, method: 'tools/list' })
+      .expect(200);
+    expect(
+      (
+        database.prepare('SELECT lastusedat FROM apikeys WHERE id = ?').get('sklive-secure-id') as {
+          lastusedat: string;
+        }
+      ).lastusedat,
+    ).toBeTruthy();
+    database.close();
+  });
+
+  it('requires an outbound Squarespace credential in secure-sqlite mode', () => {
+    const database = new DatabaseSync(':memory:');
+    const store = new ApiKeyStore(database);
+    expect(() => createHttpApp({ publicUrl, authMode: 'secure-sqlite', apiKeyStore: store, readOnly: true })).toThrow(
+      /SQUARESPACE_API_KEY/,
+    );
+    database.close();
+  });
+
   it('normalizes an origin URL, reports read-write mode, and rejects malformed public URLs', async () => {
     const app = createHttpApp({
       publicUrl: 'http://localhost',
@@ -234,4 +323,8 @@ function authorize(app: ReturnType<typeof createHttpApp>, clientId: string) {
     scope: 'mcp:tools',
     resource: publicUrl,
   });
+}
+
+function bearer(token: string): string {
+  return ['Bearer', token].join(' ');
 }

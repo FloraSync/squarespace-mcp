@@ -11,7 +11,8 @@ Use GitHub's private vulnerability reporting for this repository. Do not include
 ## Credential handling
 
 - Local stdio mode reads the Squarespace credential from the process environment.
-- Remote mode receives the credential through the authorization form over HTTPS, validates it directly with Squarespace, and embeds it only inside authenticated AES-256-GCM tokens.
-- The server never logs credentials and has no credential database.
-- Remote deployments must set a strong, stable `MCP_TOKEN_SECRET`. Rotating it invalidates all issued MCP tokens and client registrations.
+- In `insecure-env` HTTP mode, the server compares the bearer token to `MCPAPIKEY` in constant time.
+- In `secure-sqlite` HTTP mode, API keys are bcrypt-hashed in SQLite and successful uses update their audit timestamp.
+- Squarespace OAuth access and refresh tokens are encrypted with AES-256-GCM before they are stored in SQLite.
+- The server never logs credentials or plaintext API keys. Remote deployments must protect the `/data` volume and use a strong `MASTERENCRYPTIONKEY`.
 - Read-only mode is the default. Enable write tools only on deployments that need them.
