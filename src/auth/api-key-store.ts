@@ -50,6 +50,8 @@ CREATE TABLE IF NOT EXISTS oauthsessions (
 export class ApiKeyStore {
   private readonly db: DatabaseSync;
   private readonly ownsDatabase: boolean;
+  private readonly pendingAudits = new Set<string>();
+  private auditScheduled = false;
 
   constructor(database: DatabaseSync | string) {
     this.ownsDatabase = typeof database === 'string';
@@ -66,10 +68,20 @@ export class ApiKeyStore {
     const row = this.db.prepare('SELECT id, name, keyhash, createdat, lastusedat FROM apikeys WHERE id = ?').get(id) as
       (ApiKeyRecord & { keyhash: string }) | undefined;
     if (!row || !(await bcrypt.compare(token, row.keyhash))) return undefined;
-    this.db.prepare('UPDATE apikeys SET lastusedat = CURRENT_TIMESTAMP WHERE id = ?').run(id);
-    const audited = this.db.prepare('SELECT lastusedat FROM apikeys WHERE id = ?').get(id) as
-      { lastusedat: string | null } | undefined;
-    return { id: row.id, name: row.name, createdat: row.createdat, lastusedat: audited?.lastusedat ?? row.lastusedat };
+    this.pendingAudits.add(id);
+    this.scheduleAudit();
+    return { id: row.id, name: row.name, createdat: row.createdat, lastusedat: row.lastusedat };
+  }
+
+  private scheduleAudit(): void {
+    if (this.auditScheduled) return;
+    this.auditScheduled = true;
+    queueMicrotask(() => {
+      this.auditScheduled = false;
+      const ids = [...this.pendingAudits];
+      this.pendingAudits.clear();
+      for (const id of ids) this.db.prepare('UPDATE apikeys SET lastusedat = CURRENT_TIMESTAMP WHERE id = ?').run(id);
+    });
   }
 
   createApiKey(name: string, token = generateApiKey()): { id: string; name: string; token: string } {
@@ -210,9 +222,6 @@ export function openApiKeyStore(options: {
   masterEncryptionKey?: string;
 }): ApiKeyStore {
   const existed = options.databasePath !== ':memory:' && existsSync(options.databasePath);
-  if (existed && !options.masterEncryptionKey) {
-    throw new Error('MASTERENCRYPTIONKEY is required when the SQLite database already exists.');
-  }
   if (!existed && !options.initApiKey) {
     throw new Error('INITAPIKEY is required when initializing the SQLite database.');
   }

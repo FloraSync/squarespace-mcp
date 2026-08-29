@@ -5,7 +5,7 @@
 
 An MCP server for the current Squarespace Commerce APIs, built for both:
 
-- **Gemini Spark and other web clients** through a hosted HTTPS Streamable HTTP endpoint with API-key authentication and encrypted credential storage.
+- **Gemini Spark and other web clients** through a hosted HTTPS Streamable HTTP endpoint with API-key authentication.
 - **Gemini CLI, Claude Desktop, Codex, and local clients** through an npm-installed stdio executable.
 
 The server exposes **52 operations generated from Squarespace's official OpenAPI schema**. It is read-only by default and never logs Squarespace credentials.
@@ -40,7 +40,7 @@ Local MCP client ──stdio──> npx @florasync/squarespace-mcp ──Bearer�
 
 MCP client ──HTTPS/API key──> hosted /mcp endpoint ──Bearer──> Squarespace
                                      │
-                                     └─ secure-sqlite stores hashes and encrypted OAuth sessions
+                                     └─ secure-sqlite stores API-key hashes
 ```
 
 The npm release makes the executable easy to install and pins a known version. A Spark user still needs a deployed copy of its HTTP mode (Cloud Run, another container host, or an equivalent Node host).
@@ -100,17 +100,16 @@ Keep `trust: false` so the client continues to confirm tool calls. Add `"--read-
 
 The included `Dockerfile` starts Streamable HTTP mode on `$PORT`. A remote deployment requires:
 
-| Variable                    | Required                 | Purpose                                                                                   |
-| --------------------------- | ------------------------ | ----------------------------------------------------------------------------------------- |
-| `AUTHMODE`                  | No                       | `insecure-env` (default) or `secure-sqlite`                                               |
-| `MCPAPIKEY`                 | In insecure mode         | API key accepted by the HTTP MCP endpoint                                                 |
-| `SQLITEDBPATH`              | In secure mode           | Persistent SQLite path; defaults to `/data/squarespace-mcp.sqlite`                        |
-| `INITAPIKEY`                | First secure boot        | Initial admin API key; ignored after the database exists                                  |
-| `MASTERENCRYPTIONKEY`       | Existing secure database | Root key for decrypting OAuth sessions; generate with `openssl rand -hex 32`              |
-| `MCP_PUBLIC_URL`            | Yes                      | Exact public HTTPS endpoint ending in `/mcp`; used in OAuth metadata and resource binding |
-| `SQUARESPACE_API_KEY`       | No                       | Squarespace developer API key used for outbound requests                                  |
-| `SQUARESPACE_MCP_READ_ONLY` | No                       | Defaults to `true`; set `false` to publish write tools                                    |
-| `PORT`                      | No                       | HTTP port; defaults to `3000`                                                             |
+| Variable                    | Required          | Purpose                                                            |
+| --------------------------- | ----------------- | ------------------------------------------------------------------ |
+| `AUTHMODE`                  | No                | `insecure-env` (default) or `secure-sqlite`                        |
+| `MCPAPIKEY`                 | In insecure mode  | API key accepted by the HTTP MCP endpoint                          |
+| `SQLITEDBPATH`              | In secure mode    | Persistent SQLite path; defaults to `/data/squarespace-mcp.sqlite` |
+| `INITAPIKEY`                | First secure boot | Initial admin API key; ignored after the database exists           |
+| `MCP_PUBLIC_URL`            | Yes               | Exact public HTTPS endpoint ending in `/mcp`                       |
+| `SQUARESPACE_API_KEY`       | No                | Squarespace developer API key used for outbound requests           |
+| `SQUARESPACE_MCP_READ_ONLY` | No                | Defaults to `true`; set `false` to publish write tools             |
+| `PORT`                      | No                | HTTP port; defaults to `3000`                                      |
 
 Build locally:
 
@@ -124,14 +123,14 @@ docker run --rm -p 3000:3000 \
   squarespace-mcp
 ```
 
-For a persistent public deployment, use `secure-sqlite`. On first boot provide both `INITAPIKEY` and a persistent `/data` volume. On later boots, `INITAPIKEY` is ignored and `MASTERENCRYPTIONKEY` is required:
+For a persistent public deployment, use `secure-sqlite`. On first boot provide `INITAPIKEY` and a persistent `/data` volume. On later boots, `INITAPIKEY` is ignored:
 
 ```bash
 docker run --rm -p 3000:3000 -v squarespace-mcp-data:/data \
   -e AUTHMODE=secure-sqlite \
   -e INITAPIKEY="$(openssl rand -hex 32)" \
-  -e MASTERENCRYPTIONKEY="$(openssl rand -hex 32)" \
   -e MCP_PUBLIC_URL="https://your-service.example/mcp" \
+  -e SQUARESPACE_API_KEY="your-squarespace-developer-key" \
   squarespace-mcp
 ```
 
@@ -168,18 +167,16 @@ curl -H "Authorization: $AUTH_HEADER" \
 1. In the Gemini web app, open **Settings & help → Connected Apps**.
 2. Under **Custom apps for Spark**, add `https://YOUR-SERVICE-URL.run.app/mcp`.
 3. Configure the client with the matching `MCPAPIKEY` (or a key created in secure-sqlite mode).
-4. Configure `SQUARESPACE_API_KEY` for non-OAuth Squarespace developer API access.
+4. Configure `SQUARESPACE_API_KEY` for outbound Squarespace API access.
 
-The inbound MCP key is never logged. Secure-mode API keys are bcrypt-hashed, and delegated Squarespace OAuth tokens are encrypted at rest with AES-256-GCM.
+The inbound MCP key is never logged. Secure-mode API keys are bcrypt-hashed.
 
 ### Remote security model
 
 This remote mode is designed for a self-hosted deployment:
 
-- Use HTTPS only. The SDK rejects non-HTTPS issuer URLs except localhost development when OAuth discovery is enabled.
-- Keep `MCPAPIKEY` secret in insecure mode. In secure mode, rotate individual database keys when possible; protect `MASTERENCRYPTIONKEY` because it decrypts stored OAuth sessions.
-- OAuth authorization codes and refresh tokens are one-time-use within a running process. Replay and revocation caches are process-local; protect the SQLite volume and rotate `MASTERENCRYPTIONKEY` when immediate global invalidation is required.
-- Secure deployments store only API-key hashes and AES-256-GCM encrypted OAuth sessions in the persistent SQLite database.
+- Keep `MCPAPIKEY` secret in insecure mode. In secure mode, rotate individual database keys when possible.
+- Secure deployments store only API-key hashes in the persistent SQLite database.
 - Keep read-only mode enabled unless the deployment genuinely needs writes.
 - Restrict Cloud Run logs and never add request-body logging middleware.
 

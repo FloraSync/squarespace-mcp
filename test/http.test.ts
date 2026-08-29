@@ -256,6 +256,15 @@ describe('remote HTTP and Gemini Spark OAuth contract', () => {
     database.close();
   });
 
+  it('requires an outbound Squarespace credential in secure-sqlite mode', () => {
+    const database = new DatabaseSync(':memory:');
+    const store = new ApiKeyStore(database);
+    expect(() => createHttpApp({ publicUrl, authMode: 'secure-sqlite', apiKeyStore: store, readOnly: true })).toThrow(
+      /SQUARESPACE_API_KEY/,
+    );
+    database.close();
+  });
+
   it('normalizes an origin URL, reports read-write mode, and rejects malformed public URLs', async () => {
     const app = createHttpApp({
       publicUrl: 'http://localhost',

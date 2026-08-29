@@ -7,16 +7,8 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import express, { type NextFunction, type Request, type RequestHandler, type Response } from 'express';
 import { rateLimit } from 'express-rate-limit';
 
-import { createApiKeyMiddleware, extractBearerToken } from '../auth/api-key-middleware.js';
-import {
-  createInsecureVerifier,
-  OAuthSessionStore,
-  openApiKeyStore,
-  apiKeyId,
-  type ApiKeyRecord,
-  type AuthMode,
-  type ApiKeyStore,
-} from '../auth/api-key-store.js';
+import { createApiKeyMiddleware } from '../auth/api-key-middleware.js';
+import { createInsecureVerifier, openApiKeyStore, type AuthMode, type ApiKeyStore } from '../auth/api-key-store.js';
 import { SquarespaceOAuthProvider } from '../auth/provider.js';
 import { TokenCodec } from '../auth/token-codec.js';
 import { createSquarespaceMcpServer } from '../mcp/server.js';
@@ -46,7 +38,6 @@ export function createHttpApp(options: HttpTransportOptions) {
   const app = createMcpExpressApp({ host: '0.0.0.0' });
   const authMode = options.authMode ?? 'oauth';
   let provider: SquarespaceOAuthProvider | undefined;
-  let sessionStore: OAuthSessionStore | undefined;
   let bearerAuth: RequestHandler;
 
   app.get('/', (_request, response) => {
@@ -116,7 +107,7 @@ export function createHttpApp(options: HttpTransportOptions) {
           })
         : undefined);
     if (!apiKeyStore) throw new Error('A SQLite API-key store is required for secure-sqlite HTTP mode.');
-    if (options.masterEncryptionKey) sessionStore = new OAuthSessionStore(apiKeyStore, options.masterEncryptionKey);
+    if (!options.credential) throw new Error('SQUARESPACE_API_KEY is required for secure-sqlite HTTP mode.');
     bearerAuth = createApiKeyMiddleware((token) => apiKeyStore.verify(token));
   }
 
@@ -127,13 +118,8 @@ export function createHttpApp(options: HttpTransportOptions) {
       return;
     }
 
-    const bearerToken = extractBearerToken(request);
-    const apiKey = response.locals.apiKey as ApiKeyRecord | undefined;
     const credential =
-      authMode === 'oauth'
-        ? provider?.credentialFromAccessToken(auth?.token ?? '')
-        : (sessionStore?.get(apiKey?.id ?? (bearerToken ? apiKeyId(bearerToken) : ''))?.accessToken ??
-          options.credential);
+      authMode === 'oauth' ? provider?.credentialFromAccessToken(auth?.token ?? '') : options.credential;
     if (!credential) {
       response.status(503).json({ error: 'No Squarespace credential is configured for this API key.' });
       return;

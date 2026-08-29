@@ -53,18 +53,16 @@ describe('MCP API-key authentication', () => {
     ).toBeTruthy();
   });
 
-  it('bootstraps once, then requires the master key and ignores INITAPIKEY', async () => {
+  it('bootstraps once and ignores INITAPIKEY on existing databases', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'squarespace-mcp-'));
     directories.push(directory);
     const path = join(directory, 'auth.db');
     const initial = openApiKeyStore({ databasePath: path, initApiKey: 'initial-key' });
     initial.close();
 
-    expect(() => openApiKeyStore({ databasePath: path })).toThrow(/MASTERENCRYPTIONKEY/);
     const reopened = openApiKeyStore({
       databasePath: path,
       initApiKey: 'a-different-key',
-      masterEncryptionKey: 'a'.repeat(32),
     });
     databases.push(reopened);
     await expect(reopened.verify('initial-key')).resolves.toMatchObject({ name: 'admin' });

@@ -16,6 +16,13 @@ describe('CLI configuration', () => {
     expect(() => parseConfig([], {})).toThrow(/SQUARESPACE_API_KEY/);
   });
 
+  it('ignores HTTP authentication settings for stdio', () => {
+    expect(parseConfig([], { AUTHMODE: 'unsupported', SQUARESPACE_API_KEY: 'secret' })).toMatchObject({
+      transport: 'stdio',
+      credential: 'secret',
+    });
+  });
+
   it('accepts an OAuth access token and the environment read-write opt-in', () => {
     expect(
       parseConfig([], { SQUARESPACE_ACCESS_TOKEN: 'oauth-token', SQUARESPACE_MCP_READ_ONLY: 'false' }),
