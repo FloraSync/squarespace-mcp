@@ -142,7 +142,7 @@ gcloud run deploy squarespace-mcp \
   --region us-central1 \
   --allow-unauthenticated \
   --set-env-vars AUTHMODE=insecure-env,MCP_PUBLIC_URL=https://replace-after-first-deploy.invalid/mcp,SQUARESPACE_MCP_READ_ONLY=true \
-  --set-secrets MCPAPIKEY=squarespace-mcp-api-key:latest
+  --set-secrets MCPAPIKEY=squarespace-mcp-api-key:latest,SQUARESPACE_API_KEY=squarespace-api-key:latest
 ```
 
 After the first deployment, copy the service URL and update `MCP_PUBLIC_URL` to the exact service URL plus `/mcp`:
