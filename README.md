@@ -107,7 +107,7 @@ The included `Dockerfile` starts Streamable HTTP mode on `$PORT`. A remote deplo
 | `SQLITEDBPATH`              | In secure mode    | Persistent SQLite path; defaults to `/data/squarespace-mcp.sqlite` |
 | `INITAPIKEY`                | First secure boot | Initial admin API key; ignored after the database exists           |
 | `MCP_PUBLIC_URL`            | Yes               | Exact public HTTPS endpoint ending in `/mcp`                       |
-| `SQUARESPACE_API_KEY`       | Secure mode       | Squarespace developer API key used for outbound requests           |
+| `SQUARESPACE_API_KEY`       | Both HTTP modes   | Squarespace developer API key used for outbound requests           |
 | `SQUARESPACE_MCP_READ_ONLY` | No                | Defaults to `true`; set `false` to publish write tools             |
 | `PORT`                      | No                | HTTP port; defaults to `3000`                                      |
 
