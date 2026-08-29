@@ -55,8 +55,12 @@ export function parseConfig(argv: string[], environment: NodeJS.ProcessEnv): Cli
     const port = parsePort(values.port ?? environment.PORT ?? '3000');
     const publicUrl = values['public-url'] ?? environment.MCP_PUBLIC_URL ?? `http://localhost:${port}/mcp`;
     const mcpApiKey = environment.MCPAPIKEY;
+    const credential = environment.SQUARESPACE_API_KEY ?? environment.SQUARESPACE_ACCESS_TOKEN;
     if (authMode === 'insecure-env' && !mcpApiKey) {
       throw new Error('MCPAPIKEY is required for insecure-env HTTP mode.');
+    }
+    if (authMode === 'secure-sqlite' && !credential) {
+      throw new Error('SQUARESPACE_API_KEY is required for secure-sqlite HTTP mode.');
     }
     return {
       action: 'run',
@@ -68,7 +72,7 @@ export function parseConfig(argv: string[], environment: NodeJS.ProcessEnv): Cli
       databasePath: environment.SQLITEDBPATH ?? '/data/squarespace-mcp.sqlite',
       initApiKey: environment.INITAPIKEY,
       masterEncryptionKey: environment.MASTERENCRYPTIONKEY,
-      credential: environment.SQUARESPACE_API_KEY ?? environment.SQUARESPACE_ACCESS_TOKEN,
+      credential,
       host: values.host ?? environment.HOST ?? '0.0.0.0',
       port,
       readOnly,

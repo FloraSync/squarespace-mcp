@@ -58,6 +58,7 @@ describe('CLI configuration', () => {
         SQLITEDBPATH: '/tmp/florasync-auth.db',
         INITAPIKEY: 'initial-key',
         MASTERENCRYPTIONKEY: 'master-key',
+        SQUARESPACE_API_KEY: 'squarespace-key',
       }),
     ).toMatchObject({
       transport: 'http',
@@ -65,7 +66,14 @@ describe('CLI configuration', () => {
       databasePath: '/tmp/florasync-auth.db',
       initApiKey: 'initial-key',
       masterEncryptionKey: 'master-key',
+      credential: 'squarespace-key',
     });
+  });
+
+  it('requires an outbound credential for secure-sqlite HTTP mode', () => {
+    expect(() => parseConfig(['--http'], { AUTHMODE: 'secure-sqlite', MCPAPIKEY: 'initial-key' })).toThrow(
+      /SQUARESPACE_API_KEY/,
+    );
   });
 
   it('handles help and version without credentials', () => {

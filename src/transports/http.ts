@@ -65,7 +65,7 @@ export function createHttpApp(options: HttpTransportOptions) {
       );
   });
 
-  if (options.authMode === undefined) {
+  if (authMode === 'oauth') {
     if (!options.tokenSecret) throw new Error('MCP_TOKEN_SECRET is required for the legacy OAuth HTTP mode.');
     provider = new SquarespaceOAuthProvider({
       codec: new TokenCodec(options.tokenSecret),
