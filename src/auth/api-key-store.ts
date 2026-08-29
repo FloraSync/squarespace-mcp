@@ -22,7 +22,7 @@ export type OAuthSession = {
   updatedAt?: string;
 };
 
-const BCRYPT_ROUNDS = 10;
+const BCRYPT_ROUNDS = 12;
 const IV_BYTES = 12;
 const AUTH_TAG_BYTES = 16;
 
@@ -65,8 +65,7 @@ export class ApiKeyStore {
     if (!row || !(await bcrypt.compare(token, row.keyhash))) return undefined;
     this.db.prepare('UPDATE apikeys SET lastusedat = CURRENT_TIMESTAMP WHERE id = ?').run(id);
     const audited = this.db.prepare('SELECT lastusedat FROM apikeys WHERE id = ?').get(id) as
-      | { lastusedat: string | null }
-      | undefined;
+      { lastusedat: string | null } | undefined;
     return { id: row.id, name: row.name, createdat: row.createdat, lastusedat: audited?.lastusedat ?? row.lastusedat };
   }
 
@@ -187,7 +186,7 @@ export function createInsecureVerifier(expected: string): (token: string) => boo
 export function apiKeyId(token: string): string {
   const separator = token.indexOf('.');
   if (separator > 0 && separator <= 128) return token.slice(0, separator);
-  return `raw-${createHash('sha256').update(token, 'utf8').digest('hex').slice(0, 32)}`;
+  return 'bootstrap';
 }
 
 export function generateApiKey(): string {

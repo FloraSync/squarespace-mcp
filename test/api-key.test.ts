@@ -43,7 +43,7 @@ describe('MCP API-key authentication', () => {
       keyhash: string;
       lastusedat: string | null;
     };
-    expect(row.keyhash).toMatch(/^\$2[aby]\$10\$/);
+    expect(row.keyhash).toMatch(/^\$2[aby]\$12\$/);
     expect(row.keyhash).not.toContain(token);
     await expect(store.verify('sklive-test-id.wrong-secret')).resolves.toBeUndefined();
     await expect(store.verify(token)).resolves.toMatchObject({ id: created.id, name: 'farm admin' });
@@ -107,7 +107,7 @@ describe('encrypted OAuth session storage', () => {
   });
 
   it('derives stable IDs for raw bootstrap keys', () => {
-    expect(apiKeyId('raw-bootstrap-key')).toMatch(/^raw-[a-f0-9]{32}$/);
+    expect(apiKeyId('raw-bootstrap-key')).toBe('bootstrap');
     expect(apiKeyId('sklive123.secret')).toBe('sklive123');
   });
 });
