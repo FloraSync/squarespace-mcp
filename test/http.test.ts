@@ -1,8 +1,11 @@
 import { createHash } from 'node:crypto';
+import { DatabaseSync } from 'node:sqlite';
 
 import request from 'supertest';
 import { describe, expect, it, vi } from 'vitest';
 
+import { ApiKeyStore } from '../src/auth/api-key-store.js';
+import { parseConfig } from '../src/config.js';
 import { createHttpApp, startHttpTransport } from '../src/transports/http.js';
 
 const publicUrl = 'http://localhost/mcp';
@@ -222,6 +225,93 @@ describe('remote HTTP and Gemini Spark OAuth contract', () => {
     await request(app).post('/oauth/approve').type('form').send({ request: 'expired', credential: 'key' }).expect(400);
   });
 
+  it('supports non-OAuth Squarespace developer API keys in insecure-env mode', async () => {
+    const developerKey = 'squarespace-developer-key';
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ products: [] }));
+    const app = createHttpApp({
+      publicUrl,
+      authMode: 'insecure-env',
+      mcpApiKey: 'mcp-development-key',
+      credential: developerKey,
+      readOnly: true,
+      fetchImplementation: fetchMock,
+    });
+
+    await request(app).post('/mcp').send({ jsonrpc: '2.0', id: 1, method: 'tools/list' }).expect(401);
+    await request(app)
+      .post('/mcp')
+      .set('Authorization', bearer('wrong-key'))
+      .send({ jsonrpc: '2.0', id: 1, method: 'tools/list' })
+      .expect(401);
+    await request(app)
+      .post('/mcp')
+      .set('Authorization', bearer('mcp-development-key'))
+      .set('Accept', 'application/json, text/event-stream')
+      .send({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'tools/call',
+        params: { name: 'squarespace_get_products', arguments: {} },
+      })
+      .expect(200);
+    expect(new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get('authorization')).toBe(bearer(developerKey));
+
+    const missingCredentialApp = createHttpApp({
+      publicUrl,
+      authMode: 'insecure-env',
+      mcpApiKey: 'mcp-development-key',
+      readOnly: true,
+    });
+    await request(missingCredentialApp)
+      .post('/mcp')
+      .set('Authorization', bearer('mcp-development-key'))
+      .send({ jsonrpc: '2.0', id: 1, method: 'tools/list' })
+      .expect(503);
+  });
+
+  it('supports bcrypt API keys in secure-sqlite mode', async () => {
+    const database = new DatabaseSync(':memory:');
+    const store = new ApiKeyStore(database);
+    const apiKey = 'sklive-secure-id.secure-secret';
+    store.createApiKey('cloud admin', apiKey);
+    const app = createHttpApp({
+      publicUrl,
+      authMode: 'secure-sqlite',
+      apiKeyStore: store,
+      credential: 'squarespace-developer-key',
+      readOnly: true,
+    });
+
+    await request(app)
+      .post('/mcp')
+      .set('Authorization', bearer('wrong-key'))
+      .send({ jsonrpc: '2.0', id: 1, method: 'tools/list' })
+      .expect(401);
+    await request(app)
+      .post('/mcp')
+      .set('Authorization', bearer(apiKey))
+      .set('Accept', 'application/json, text/event-stream')
+      .send({ jsonrpc: '2.0', id: 1, method: 'tools/list' })
+      .expect(200);
+    expect(
+      (
+        database.prepare('SELECT lastusedat FROM apikeys WHERE id = ?').get('sklive-secure-id') as {
+          lastusedat: string;
+        }
+      ).lastusedat,
+    ).toBeTruthy();
+    database.close();
+  });
+
+  it('requires an outbound Squarespace credential in secure-sqlite mode', () => {
+    const database = new DatabaseSync(':memory:');
+    const store = new ApiKeyStore(database);
+    expect(() => createHttpApp({ publicUrl, authMode: 'secure-sqlite', apiKeyStore: store, readOnly: true })).toThrow(
+      /SQUARESPACE_API_KEY/,
+    );
+    database.close();
+  });
+
   it('normalizes an origin URL, reports read-write mode, and rejects malformed public URLs', async () => {
     const app = createHttpApp({
       publicUrl: 'http://localhost',
@@ -250,12 +340,12 @@ describe('remote HTTP and Gemini Spark OAuth contract', () => {
 });
 
 function createApp(fetchImplementation: typeof fetch = vi.fn<typeof fetch>()) {
-  return createHttpApp({
-    publicUrl,
-    tokenSecret: 'test-secret-that-is-longer-than-thirty-two-characters',
-    readOnly: true,
-    fetchImplementation,
+  const config = parseConfig(['--http'], {
+    MCP_PUBLIC_URL: publicUrl,
+    MCP_TOKEN_SECRET: 'test-secret-that-is-longer-than-thirty-two-characters',
   });
+  if (config.action !== 'run' || config.transport !== 'http') throw new Error('Expected HTTP configuration.');
+  return createHttpApp({ ...config, fetchImplementation });
 }
 
 function register(app: ReturnType<typeof createHttpApp>, redirectUris = [redirectUri]) {
@@ -286,4 +376,8 @@ function completionRedirect(html: string): URL {
   const target = html.match(/id="oauth-continue" href="([^"]+)"/)?.[1];
   if (!target) throw new Error('OAuth approval did not provide a continuation link.');
   return new URL(target.replaceAll('&amp;', '&'));
+}
+
+function bearer(token: string): string {
+  return ['Bearer', token].join(' ');
 }

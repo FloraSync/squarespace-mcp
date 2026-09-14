@@ -25,8 +25,15 @@ Stdio environment:
   SQUARESPACE_ACCESS_TOKEN        Squarespace OAuth token (alternative)
 
 HTTP environment:
+  AUTHMODE                        oauth, insecure-env, or secure-sqlite
+                                  Default: oauth with MCP_TOKEN_SECRET; otherwise insecure-env
+  MCP_TOKEN_SECRET                32+ character secret for OAuth HTTP mode
+  MCPAPIKEY                       Inbound bearer key for insecure-env HTTP mode
+  SQUARESPACE_API_KEY             Outbound credential for API-key HTTP modes
+  SQLITEDBPATH                    SQLite path for secure-sqlite (default: /data/squarespace-mcp.sqlite)
+  INITAPIKEY                      Initial secure-sqlite admin key (first boot only)
+  MASTERENCRYPTIONKEY             Root key for secure-sqlite encrypted OAuth tokens
   MCP_PUBLIC_URL                  Public HTTPS URL ending in /mcp
-  MCP_TOKEN_SECRET                Secret used to encrypt credentials and OAuth tokens
 `;
 
 try {

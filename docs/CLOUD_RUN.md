@@ -1,239 +1,144 @@
 # ☁️ Deploying Squarespace MCP to Google Cloud Run
 
-> **A quick, beginner-friendly guide to hosting your Squarespace MCP server on Google Cloud Run for Gemini Spark and web-based AI assistants.**
+This guide uses **OAuth HTTP mode** for browser-based MCP clients. Each user enters their own Squarespace credential during login. `/mcp` requires that user's issued bearer token on every call; Cloud Run public ingress does not grant anonymous store access.
 
----
+Use the current source for the OAuth browser-submission fix and the additional API-key modes. The published `0.1.0` container predates these changes.
 
-## 🎯 Why Deploy to Cloud Run?
+## Prerequisites
 
-If you use **Gemini Spark** on the web ([gemini.google.com](https://gemini.google.com)), Google's cloud servers need a secure public HTTPS address to communicate with your Squarespace store. Unlike desktop apps (like Claude Desktop or Cursor), web-based AI cannot run commands on your personal computer.
+- A Google Cloud project with billing enabled and the [gcloud CLI](https://cloud.google.com/sdk/docs/install).
+- Permission to deploy Cloud Run services, create service accounts, grant the documented roles, and act as the build and runtime accounts.
+- A local checkout of this repository. Source deployment builds the included Node.js 24 Dockerfile.
+- A Squarespace credential for browser login. OAuth mode does not need that credential in the server environment.
 
-Deploying to **Google Cloud Run** gives you:
-
-- 🌐 **A dedicated, secure HTTPS web address** for Gemini Spark.
-- 💰 **Near-zero cost**: Cloud Run scales to zero when not in use. For typical personal or small business store usage, it usually stays comfortably within [Google Cloud's Free Tier](https://cloud.google.com/free).
-- 🛡️ **Enterprise-grade security**: Credentials are encrypted with AES-256-GCM tokens. Your Squarespace key is never stored in a database and never logged.
-- ⚡ **Zero server maintenance**: Fully managed by Google—no virtual machines to patch or update.
-
----
-
-## 🧭 How It Works
-
-```text
-1. Gemini Spark                2. Cloud Run Service                 3. Squarespace API
-   (Google Web App)               (squarespace-mcp)
-          │                              │                                  │
-          ├── Connects via HTTPS ───────>│                                  │
-          │   (OAuth 2.1 Discovery)      │                                  │
-          │                              │                                  │
-          │<── Opens Login Screen ───────┤ (You enter Squarespace API key)  │
-          │                              ├── Verifies key directly ────────>│
-          │                              │<── Confirms store access ────────┤
-          │<── Grants Encrypted Token ───┤                                  │
-          │                              │                                  │
-          ├── "What are recent orders?" ─>│── Queries store securely ───────>│
-          │<── Shows order answers ──────│<── Returns live order data ──────┤
-```
-
----
-
-## 📋 Prerequisites Checklist
-
-Before you begin, make sure you have:
-
-1. **A Google Cloud account** with billing enabled ([cloud.google.com](https://cloud.google.com)).
-2. **The `gcloud` CLI installed** on your computer ([installation guide](https://cloud.google.com/sdk/docs/install)).
-3. **Your Squarespace API Key** (from **Settings** → **Developer Tools** → **Developer API Keys** in your Squarespace dashboard).
-
----
-
-## 🚀 Quick Step-by-Step Deployment (5 Minutes)
-
-### Step 1: Initialize Your Google Cloud Environment
-
-Open your terminal and set your Google Cloud project variables:
+## 1. Set the Project and Enable Services
 
 ```bash
-# Replace with your actual Google Cloud project ID
 export PROJECT_ID="your-project-id"
 export REGION="us-central1"
 export SERVICE="squarespace-mcp"
+export TOKEN_SECRET="MCP_TOKEN_SECRET"
+export RUNTIME_SA="squarespace-mcp-run@${PROJECT_ID}.iam.gserviceaccount.com"
+export BUILD_SA="squarespace-mcp-build@${PROJECT_ID}.iam.gserviceaccount.com"
 
-# Set your active project
-gcloud config set project "$PROJECT_ID"
-
-# Enable required Google Cloud services (takes ~30 seconds)
 gcloud services enable \
-  run.googleapis.com \
-  artifactregistry.googleapis.com \
-  secretmanager.googleapis.com \
-  cloudbuild.googleapis.com
+  run.googleapis.com artifactregistry.googleapis.com \
+  secretmanager.googleapis.com cloudbuild.googleapis.com \
+  --project "$PROJECT_ID"
 ```
 
----
+## 2. Create Dedicated Service Accounts and the Secret
 
-### Step 2: Store Your Token Secret Safely
-
-Squarespace MCP uses an encryption key (`MCP_TOKEN_SECRET`) to protect session tokens. We store this key securely in Google Secret Manager:
+Run account and secret creation once. Reuse existing accounts and secret versions when updating a deployment.
 
 ```bash
-# 1. Generate a random 32-character secret and store it in Secret Manager
+gcloud iam service-accounts create squarespace-mcp-run --project "$PROJECT_ID"
+gcloud iam service-accounts create squarespace-mcp-build --project "$PROJECT_ID"
+
+gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+  --member="serviceAccount:${BUILD_SA}" \
+  --role="roles/run.builder"
+
 openssl rand -base64 32 | \
-  gcloud secrets create squarespace-mcp-token-secret \
-    --data-file=-
+  gcloud secrets create "$TOKEN_SECRET" --data-file=- --project "$PROJECT_ID"
 
-# 2. Allow your Cloud Run service to read this secret
-PROJECT_NUMBER=$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')
-
-gcloud secrets add-iam-policy-binding squarespace-mcp-token-secret \
-  --member="serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
-  --role="roles/secretmanager.secretAccessor"
+gcloud secrets add-iam-policy-binding "$TOKEN_SECRET" \
+  --member="serviceAccount:${RUNTIME_SA}" \
+  --role="roles/secretmanager.secretAccessor" \
+  --project "$PROJECT_ID"
 ```
 
----
+Only the runtime account needs access to the token secret. The commands below pin secret version `1`; use the intended version if the secret already exists. Google recommends pinning secret versions when supplying secrets as environment variables. See [Cloud Run secrets](https://docs.cloud.google.com/run/docs/configuring/services/secrets).
 
-### Step 3: Deploy to Cloud Run
+## 3. Deploy from Source
 
-You can deploy using the official prebuilt container from GitHub Container Registry:
+Run this from the repository root. For an existing service, use its current public MCP URL instead of the placeholder to preserve OAuth issuer and resource URLs.
 
 ```bash
 gcloud run deploy "$SERVICE" \
-  --image "ghcr.io/florasync/squarespace-mcp:0.1.0" \
+  --source . \
+  --project "$PROJECT_ID" \
   --region "$REGION" \
+  --service-account "$RUNTIME_SA" \
+  --build-service-account="projects/${PROJECT_ID}/serviceAccounts/${BUILD_SA}" \
   --allow-unauthenticated \
-  --port 3000 \
-  --cpu 1 \
-  --memory 512Mi \
-  --min-instances 0 \
-  --max-instances 3 \
-  --set-env-vars "MCP_PUBLIC_URL=https://placeholder.invalid/mcp,SQUARESPACE_MCP_READ_ONLY=true" \
-  --set-secrets "MCP_TOKEN_SECRET=squarespace-mcp-token-secret:latest"
+  --port 3000 --cpu 1 --memory 512Mi \
+  --min-instances 0 --max-instances 1 \
+  --update-env-vars "AUTHMODE=oauth,MCP_PUBLIC_URL=https://placeholder.invalid/mcp,SQUARESPACE_MCP_READ_ONLY=true" \
+  --update-secrets "MCP_TOKEN_SECRET=${TOKEN_SECRET}:1"
 ```
 
-> [!NOTE]
-> **Why `--allow-unauthenticated`?**
-> Cloud Run's outer network layer allows public ingress so Gemini Spark can reach the service. The service itself strictly secures the `/mcp` endpoint with OAuth 2.1 authentication.
+`--allow-unauthenticated` permits public ingress to OAuth discovery and consent. The application authenticates `/mcp` itself. The build account's `roles/run.builder` role is documented in [Cloud Run source deployment](https://docs.cloud.google.com/run/docs/deploying-source-code).
 
----
+OAuth replay and revocation tracking is currently in memory. Limiting instances does not preserve that state across restarts or provide global revocation. Read the [security limitations](../SECURITY.md#oauth-replay-and-revocation-limits) before scaling.
 
-### Step 4: Link Your Public Service URL
-
-Because Cloud Run assigns a unique HTTPS URL to your service, we now set `MCP_PUBLIC_URL` to match that exact URL:
+## 4. Set the Public URL on First Deployment
 
 ```bash
-# 1. Fetch your assigned Cloud Run HTTPS URL
 SERVICE_URL=$(gcloud run services describe "$SERVICE" \
-  --region "$REGION" \
+  --project "$PROJECT_ID" --region "$REGION" \
   --format='value(status.url)')
 
-echo "Your service is running at: $SERVICE_URL"
-
-# 2. Update the service with its public MCP endpoint
 gcloud run services update "$SERVICE" \
-  --region "$REGION" \
+  --project "$PROJECT_ID" --region "$REGION" \
   --update-env-vars "MCP_PUBLIC_URL=${SERVICE_URL}/mcp"
 ```
 
----
+Keep using the same public URL on later deployments. Changing it changes the OAuth resource identity and can require clients to reconnect.
 
-### Step 5: Test the Deployment
-
-Verify everything is working with these two quick terminal commands:
+## 5. Verify and Connect
 
 ```bash
-# 1. Check health (should output: OK or 200)
-curl -i "$SERVICE_URL/healthz"
+# Health JSON; keep the trailing slash on Cloud Run.
+curl --fail-with-body "$SERVICE_URL/healthz/"
 
-# 2. Check OAuth metadata (should return JSON describing the MCP endpoint)
-curl -s "$SERVICE_URL/.well-known/oauth-protected-resource/mcp"
+# OAuth discovery metadata.
+curl --fail-with-body "$SERVICE_URL/.well-known/oauth-protected-resource/mcp"
+
+# No bearer token: expect HTTP 401.
+curl -i -X POST "$SERVICE_URL/mcp" \
+  -H 'Content-Type: application/json' \
+  --data '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
 ```
 
-🎉 **Congratulations! Your server is live and ready to connect!**
+Add `${SERVICE_URL}/mcp` to your MCP client and start its OAuth login. Enter your Squarespace credential on the consent page. After validation, the completion page returns you to the client; use **Continue to your app** if automatic navigation does not run.
 
----
+If a browser still reports a `form-action` CSP error, close the old authorization tab and start a fresh login. Open that login on the same machine as a client using a localhost callback. The current completion page ends the form submission before navigating to the client callback, so callback redirects do not inherit the form's submission restriction.
 
-## 🔗 Step 6: Connect Gemini Spark
+## Existing FloraSync Deployment
 
-Now bring your Squarespace store into Gemini Spark:
+The current service is in project `florasync-cc`, region `us-central1`:
 
-1. Open [Gemini](https://gemini.google.com) in your web browser.
-2. Click **Settings & help** (gear icon or menu) → **Connected Apps**.
-3. Scroll to **Custom apps for Spark** and click **Add custom app** (or **+**).
-4. In the URL field, paste your full MCP address:
-   ```text
-   https://YOUR-SERVICE-URL.run.app/mcp
-   ```
-5. Click **Connect**. Gemini Spark will discover the server and open the secure FloraSync authorization screen.
-6. Paste your **Squarespace API Key** into the box and click **Authorize**.
-7. The server verifies your key directly with Squarespace and redirects back to Gemini.
+- Service: `squarespace-mcp`
+- Public MCP URL: `https://squarespace-mcp-6jwboz4p3q-uc.a.run.app/mcp`
+- Secret binding: `MCP_TOKEN_SECRET=MCP_TOKEN_SECRET:1`
+- Runtime account: `squarespace-mcp-run@florasync-cc.iam.gserviceaccount.com`
+- Build account: `squarespace-mcp-build@florasync-cc.iam.gserviceaccount.com`
+- Read-only mode is enabled.
 
-You're done! You can now ask Gemini questions like:
+The existing configuration remains in OAuth mode without a new secret. Set `AUTHMODE=oauth` explicitly on the next deployment. Preserve the public URL above even if `gcloud` displays the alternative Cloud Run hostname.
 
-- _"What products do we have in our store?"_
-- _"Are any items out of stock?"_
-- _"Show me recent orders and customer names."_
+## Rotating the OAuth Secret
 
----
-
-## 🛡️ Security & Production Highlights
-
-- **Safe Read-Only Default**: By default, the server cannot modify or delete anything. To enable write operations (like creating discounts or updating stock), update the environment variable:
-  ```bash
-  gcloud run services update "$SERVICE" \
-    --region "$REGION" \
-    --update-env-vars "SQUARESPACE_MCP_READ_ONLY=false"
-  ```
-- **Zero Database Storage**: Your Squarespace key is never saved to a database or disk. It exists only in encrypted session tokens and in-memory during active requests.
-- **Immediate Global Revocation**: Need to revoke all active sessions immediately? Just rotate the secret in Secret Manager:
-  ```bash
-  openssl rand -base64 32 | \
-    gcloud secrets versions add squarespace-mcp-token-secret --data-file=-
-  ```
-- **Redacted Error Logs**: The server automatically scrubs credentials from error responses and logs.
-
----
-
-## ❓ Frequently Asked Questions & Troubleshooting
-
-### How do I update to a newer version of the server?
-
-Simply re-run the `gcloud run deploy` command with the updated image tag:
+Add a new version, note its version number, then deploy it to running instances:
 
 ```bash
-gcloud run deploy "$SERVICE" \
-  --image "ghcr.io/florasync/squarespace-mcp:latest" \
-  --region "$REGION"
+openssl rand -base64 32 | \
+  gcloud secrets versions add "$TOKEN_SECRET" --data-file=- --project "$PROJECT_ID"
+
+# Replace 2 with the version just created.
+gcloud run services update "$SERVICE" \
+  --project "$PROJECT_ID" --region "$REGION" \
+  --update-secrets "MCP_TOKEN_SECRET=${TOKEN_SECRET}:2"
+
+gcloud run services update-traffic "$SERVICE" \
+  --project "$PROJECT_ID" --region "$REGION" --to-latest
 ```
 
-### Why does the health check return an error?
+Secret values are read at process startup. Adding a version by itself does not invalidate current tokens. Retire old revisions and any tagged URLs using the previous secret. Clients must register and authenticate again after the rollout.
 
-Ensure your service deployed successfully and that Cloud Run port `3000` is mapped. You can view real-time logs using:
+## Updating and Alternative Authentication
 
-```bash
-gcloud run services logs tail "$SERVICE" --region "$REGION"
-```
+To update the server, rerun source deployment with the current public URL and intended secret version. To enable write tools, set `SQUARESPACE_MCP_READ_ONLY=false` only when needed.
 
-### Can I build from source instead of using the GHCR image?
-
-Yes! If you cloned the repository locally, you can build directly with Cloud Build:
-
-```bash
-gcloud artifacts repositories create mcp \
-  --repository-format=docker \
-  --location="$REGION"
-
-gcloud builds submit \
-  --tag "$REGION-docker.pkg.dev/$PROJECT_ID/mcp/squarespace-mcp:0.1.0" .
-
-gcloud run deploy "$SERVICE" \
-  --image "$REGION-docker.pkg.dev/$PROJECT_ID/mcp/squarespace-mcp:0.1.0" \
-  --region "$REGION"
-```
-
----
-
-## 📚 Helpful Links
-
-- [Squarespace Developer API Keys](https://developers.squarespace.com/commerce-apis/authentication-and-permissions)
-- [Google Cloud Run Documentation](https://cloud.google.com/run/docs)
-- [Gemini Spark Connected Apps Guide](https://support.google.com/gemini/answer/17209137)
+For clients that send a fixed bearer key, see the [HTTP authentication modes](../README.md#http-authentication-modes). Those modes require a separate server-side Squarespace credential. `secure-sqlite` needs persistent SQLite storage; Cloud Run's local filesystem is ephemeral, so the container's `/data` path alone is insufficient.

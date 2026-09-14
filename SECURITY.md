@@ -1,77 +1,58 @@
 # 🛡️ Security & Privacy Policy
 
-At FloraSync, security and data privacy are foundational. **Squarespace MCP** is engineered so you can safely bring AI assistance to your e-commerce business without compromising sensitive customer data or store credentials.
+## Supported Versions and Reporting
 
----
+Security fixes are released for the latest published version of `@florasync/squarespace-mcp`.
 
-## 🔒 Security Highlights at a Glance
+Report vulnerabilities through [GitHub Private Vulnerability Reporting](https://github.com/FloraSync/squarespace-mcp/security/advisories/new). Never include real API keys, OAuth tokens, customer data, or order data in reports or public issues.
 
-- 🛡️ **Read-Only by Default**: The server starts in read-only mode. It cannot modify, adjust, or delete store data unless you explicitly enable write mode (`--read-write` or `SQUARESPACE_MCP_READ_ONLY=false`).
-- 🚫 **Zero Credential Logging**: API keys, bearer tokens, and customer secrets are rigorously scrubbed and never written to standard output, server logs, or error responses.
-- 💾 **No Credential Database**: We never store your Squarespace API keys or tokens in a database, disk file, or external service.
-- 🔐 **AES-256-GCM Token Encryption**: In remote/web mode (Gemini Spark), session tokens are encrypted using authenticated 256-bit AES encryption.
-- 🚨 **Instant Emergency Revocation**: Rotating your encryption key (`MCP_TOKEN_SECRET`) instantly invalidates all active sessions, registrations, and access tokens across the board.
+## Read-Only by Default
 
----
+The server exposes read-only tools unless the operator enables `--read-write` or `SQUARESPACE_MCP_READ_ONLY=false`. Give the Squarespace credential only the permissions needed for the deployment.
 
-## 💻 How Credentials Are Handled
+## Credential Handling
 
-### 1. Local Mode (Claude Desktop, Cursor, Gemini CLI)
+### Local Stdio Mode
 
-When running locally on your computer:
+The process reads `SQUARESPACE_API_KEY` or `SQUARESPACE_ACCESS_TOKEN` from its environment and sends it to Squarespace for API requests. Protect any client configuration file or secret store used to supply that environment variable.
 
-- Your Squarespace API key stays completely on your local machine within the running process memory.
-- No network requests are sent anywhere except directly between your machine and Squarespace's official API (`api.squarespace.com`).
-- Once you close your AI assistant, the in-memory process terminates.
+### OAuth HTTP Mode (`AUTHMODE=oauth`)
 
-### 2. Remote Web Mode (Gemini Spark & Cloud Run)
+- Each user submits their own Squarespace credential to the hosted consent page. The server validates it directly with Squarespace and encrypts it into OAuth tokens using AES-256-GCM and `MCP_TOKEN_SECRET`.
+- The application does not write these credentials to a database. They are present in process memory while used and inside encrypted tokens retained by the client. Where a client persists its tokens depends on that client's configuration.
+- Every `/mcp` request requires a valid bearer token. One user's authorization does not unlock the endpoint for anonymous callers or other users.
+- Access tokens expire after one hour. Refresh tokens expire after 30 days and are replaced on refresh; active sessions can therefore last longer than 30 days.
+- Bearer tokens are not bound to a particular machine. Anyone who obtains a valid token can use it until it expires or is invalidated.
+- Authorization codes expire after three minutes and use PKCE. The consent form submits only to the same origin. A completion page then navigates to the registered callback, with a manual continuation link and a nonce-protected script.
 
-When deployed to the cloud for web-based AI clients:
+Existing deployments that set `MCP_TOKEN_SECRET` without `AUTHMODE` keep using OAuth mode.
 
-- **Direct Verification**: When you log in via the web consent screen, the server immediately validates your key directly with Squarespace.
-- **Stateless Tokens**: Your credential is encrypted into short-lived, resource-bound OAuth tokens using **AES-256-GCM**.
-- **Ephemeral Storage**: Keys live only in the encrypted tokens held by the authenticated client (e.g. Gemini Spark) and in-memory while executing requests.
-- **Process Isolation**: No user credentials or customer order histories are saved to disk or persistent databases.
+### API-Key HTTP Modes
 
----
+The inbound MCP key and the outbound Squarespace credential are separate:
 
-## 🔑 Best Practices for Squarespace API Keys
+- `insecure-env` compares the caller's bearer token with `MCPAPIKEY` in constant time.
+- `secure-sqlite` stores bcrypt hashes of MCP keys in SQLite and records successful-use timestamps. `INITAPIKEY` creates the initial admin key only when the database is first created.
+- Both modes use the server's `SQUARESPACE_API_KEY` or `SQUARESPACE_ACCESS_TOKEN` for outbound requests. All authorized MCP callers therefore access the same configured store, subject to the server's read-only setting and the Squarespace credential's permissions.
+- These modes do not expose browser OAuth login. A client must support supplying a bearer key.
+- Protect the SQLite database and its backups. Cloud Run's local filesystem is ephemeral and is not durable key storage.
 
-To keep your store safe, follow these best practices:
+The separate `OAuthSessionStore` helper encrypts stored access and refresh tokens with AES-256-GCM using a key derived from `MASTERENCRYPTIONKEY`. The HTTP routes do not currently use this helper, so setting that variable does not enable a stored Squarespace OAuth session flow.
 
-1. **Principle of Least Privilege**: When generating a Developer API Key in Squarespace:
-   - If you only want your AI to answer questions (e.g. check inventory, list orders), select **Read** permissions only.
-   - Only grant **Write** permissions for specific areas if you intend to have your AI manage catalog items or create discounts.
-2. **One Key Per Tool**: Generate a dedicated API key specifically for Squarespace MCP (e.g. named `Squarespace MCP AI`). Do not reuse keys across different integrations.
-3. **Easy Revocation**: If you ever suspect a key has been compromised or you stop using the integration, navigate to **Settings** → **Developer Tools** → **Developer API Keys** in Squarespace and click **Revoke**. The key will stop working immediately.
+## OAuth Replay and Revocation Limits
 
----
+Consumed authorization codes, consumed refresh tokens, and revoked-token state are kept in process memory. They are not shared between instances and do not survive process restarts. Refresh-token exchange also does not currently consult the revoked-token map.
 
-## 🚨 Emergency Token Revocation (Remote Cloud Mode)
+A single-instance setting reduces concurrent copies but does not make this state durable or guarantee only one process during a rollout. Use a durable authorization and revocation service before treating this as a public multi-tenant service.
 
-If you have deployed Squarespace MCP to Google Cloud Run and need to immediately kick out all active sessions:
+## Emergency Revocation
 
-Rotate the `MCP_TOKEN_SECRET` in Google Secret Manager:
+Revoke a compromised Squarespace credential in Squarespace to stop its API access.
 
-```bash
-openssl rand -base64 32 | \
-  gcloud secrets versions add squarespace-mcp-token-secret --data-file=-
-```
+To invalidate all OAuth tokens issued by this deployment, generate a new `MCP_TOKEN_SECRET` version and deploy a new revision that references it. **Adding a Secret Manager version alone does not change running processes.** Route traffic to the new revision and retire old revisions, including any tagged URLs that still serve the old secret. Existing clients must register and authenticate again. See the [Cloud Run guide](docs/CLOUD_RUN.md#rotating-the-oauth-secret) for commands.
 
-Every existing OAuth token, session, and dynamic registration will immediately fail decryption and become unusable.
+For API-key modes, replace `MCPAPIKEY` and restart the service, or remove the compromised key from the SQLite database. Changing `MCP_TOKEN_SECRET` does not revoke API-key-mode access.
 
----
+## Logs and Operational Access
 
-## 📢 Reporting a Vulnerability
-
-We appreciate responsible security disclosures. If you believe you have found a security vulnerability in Squarespace MCP:
-
-1. Please report it via **[GitHub Private Vulnerability Reporting](https://github.com/FloraSync/squarespace-mcp/security/advisories/new)**.
-2. **Never include real API keys, tokens, or customer data** in bug reports, pull requests, or issue trackers.
-3. We will review the report promptly and publish security fixes for the latest supported release.
-
----
-
-## 📦 Supported Versions
-
-Security updates are released for the latest published version on npm (`@florasync/squarespace-mcp`).
+The application redacts credentials from Squarespace error details and does not intentionally log API keys or plaintext tokens. Do not add request-body or authorization-header logging. Restrict access to deployment configuration, secrets, logs, and database backups.

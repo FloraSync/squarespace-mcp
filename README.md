@@ -3,7 +3,7 @@
 [![CI](https://github.com/FloraSync/squarespace-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/FloraSync/squarespace-mcp/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/@florasync/squarespace-mcp.svg)](https://www.npmjs.com/package/@florasync/squarespace-mcp)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Node.js](https://img.shields.io/badge/Node.js-%3E%3D20-brightgreen.svg)](https://nodejs.org/)
+[![Node.js](https://img.shields.io/badge/Node.js-%3E%3D24-brightgreen.svg)](https://nodejs.org/)
 
 **Connect your Squarespace store directly to your favorite AI assistants.**
 
@@ -21,7 +21,7 @@ Once connected, you can ask questions and give instructions in plain English:
 - 👥 **Customers & Contacts**: _"Look up customer details for alex@example.com"_ or _"Find our top 10 customers by total spend."_
 - 📈 **Store Performance**: _"Summarize transaction volume and sales for this past month."_
 
-> 🛡️ **Safe by Default**: Squarespace MCP starts in **100% read-only mode**. Your AI can look up orders, inventory, and analytics, but it **cannot modify or delete anything** in your store unless you explicitly enable write mode. Your API keys are never logged or stored in any database.
+> 🛡️ **Safe by Default**: Squarespace MCP starts in **100% read-only mode**. Your AI can look up orders, inventory, and analytics, but it **cannot modify or delete anything** in your store unless you explicitly enable write mode. Credential storage depends on the selected authentication mode; see [Security & Privacy](#-security--privacy).
 
 ---
 
@@ -58,7 +58,7 @@ To let your AI interact with your store, create a secure API key:
 
 ### 💻 Local Desktop Setup (Claude, Cursor, Gemini CLI)
 
-Local setups run directly on your computer. You only need **Node.js 20 or newer** installed.
+Local setups run directly on your computer. You only need **Node.js 24 or newer** installed.
 
 <a id="claude-desktop"></a>
 
@@ -167,11 +167,56 @@ Gemini Spark (Google Web App)     ──HTTPS──> Hosted Cloud Run Service   
 
 #### How to connect Gemini Spark:
 
-1. **Deploy the container** to Google Cloud Run (takes ~3 minutes, free or pennies/month). Follow our step-by-step [Google Cloud Run Deployment Guide](docs/CLOUD_RUN.md).
+1. **Deploy the container in OAuth mode** to Google Cloud Run. Follow our step-by-step [Google Cloud Run Deployment Guide](docs/CLOUD_RUN.md).
 2. In the Gemini web app, go to **Settings & help** → **Connected Apps**.
 3. Under **Custom apps for Spark**, enter your deployed URL (e.g. `https://your-service.run.app/mcp`).
 4. Spark automatically connects and opens a secure authorization page.
 5. Paste your Squarespace API key. The server validates your key directly with Squarespace and you're ready to chat!
+
+---
+
+## HTTP Authentication Modes
+
+Choose the mode explicitly with `AUTHMODE`. Existing deployments with `MCP_TOKEN_SECRET` and no `AUTHMODE` continue using OAuth. Without either setting, HTTP mode defaults to `insecure-env` and requires `MCPAPIKEY`.
+
+| Mode            | Caller authenticates with                            | Squarespace credential                                                      |
+| --------------- | ---------------------------------------------------- | --------------------------------------------------------------------------- |
+| `oauth`         | A bearer token issued after browser consent and PKCE | Each user enters their own credential at login; encrypted into their tokens |
+| `insecure-env`  | The shared `MCPAPIKEY` bearer key                    | Server environment: `SQUARESPACE_API_KEY` or `SQUARESPACE_ACCESS_TOKEN`     |
+| `secure-sqlite` | An API key whose bcrypt hash is stored in SQLite     | Server environment: `SQUARESPACE_API_KEY` or `SQUARESPACE_ACCESS_TOKEN`     |
+
+OAuth mode supports browser login and discovery. Both API-key modes require a client that can send a configured bearer token; they do not expose the OAuth login endpoints. Every caller with a valid MCP API key accesses the server-configured Squarespace store. Keep the inbound MCP key separate from the outbound Squarespace credential.
+
+Build the current source with Node.js 24 or Docker. The published `0.1.0` image predates these authentication and browser-login fixes:
+
+```bash
+docker build -t squarespace-mcp .
+docker run --rm -p 3000:3000 \
+  -e AUTHMODE=oauth \
+  -e MCP_TOKEN_SECRET \
+  -e MCP_PUBLIC_URL=http://localhost:3000/mcp \
+  squarespace-mcp
+```
+
+Set `MCP_TOKEN_SECRET` securely in your shell before running the command. For API-key access, set `MCPAPIKEY` and `SQUARESPACE_API_KEY` in your shell, then run:
+
+```bash
+docker run --rm -p 3000:3000 \
+  -e AUTHMODE=insecure-env -e MCPAPIKEY -e SQUARESPACE_API_KEY \
+  -e MCP_PUBLIC_URL=http://localhost:3000/mcp \
+  squarespace-mcp
+```
+
+For SQLite-backed API keys, set `INITAPIKEY` to the initial caller key and provide persistent storage. Later boots ignore `INITAPIKEY` when the database already exists:
+
+```bash
+docker run --rm -p 3000:3000 -v squarespace-mcp-data:/data \
+  -e AUTHMODE=secure-sqlite -e INITAPIKEY -e SQUARESPACE_API_KEY \
+  -e MCP_PUBLIC_URL=http://localhost:3000/mcp \
+  squarespace-mcp
+```
+
+Cloud Run's local filesystem is ephemeral, so the named Docker volume example is for hosts with persistent storage. Use the [OAuth Cloud Run guide](docs/CLOUD_RUN.md) for the existing deployment. SQLite key storage does not provide a shared revocation service for the OAuth mode.
 
 ---
 
@@ -221,9 +266,9 @@ Squarespace MCP provides **52 official operations** generated directly from Squa
 We take the security of your store seriously:
 
 - **Never logs credentials**: API keys and tokens are strictly scrubbed from logs and error messages.
-- **No credential database**: The server never stores your API key on disk or in a database.
+- **Mode-specific storage**: OAuth mode encrypts per-user credentials into client-held tokens. SQLite mode stores bcrypt hashes of inbound MCP keys; outbound Squarespace credentials come from the server environment.
 - **Process isolation**: In local mode, keys stay in your personal machine's environment.
-- **Industry-standard encryption**: In remote/web mode, credentials and OAuth tokens are encrypted using **AES-256-GCM** with a secret key (`MCP_TOKEN_SECRET`) you control.
+- **OAuth token encryption**: OAuth mode uses **AES-256-GCM** with `MCP_TOKEN_SECRET`. Access tokens last one hour; refresh tokens last 30 days and rotate when used. Replay and revocation state is held in process memory.
 - **Client safety confirmations**: MCP clients (like Claude and Gemini CLI) prompt you before executing actions.
 
 For complete details, please read our [Security Policy](SECURITY.md).
@@ -246,14 +291,19 @@ For complete details, please read our [Security Policy](SECURITY.md).
 
 ### Environment Variables
 
-| Variable                    | Transport     | Required?  | Purpose                                                                           |
-| :-------------------------- | :------------ | :--------- | :-------------------------------------------------------------------------------- |
-| `SQUARESPACE_API_KEY`       | Local / Stdio | Yes*       | Your Squarespace Developer API Key (*or use `SQUARESPACE_ACCESS_TOKEN` for OAuth) |
-| `SQUARESPACE_ACCESS_TOKEN`  | Local / Stdio | Optional   | Squarespace OAuth Bearer Token (required for webhook operations)                  |
-| `SQUARESPACE_MCP_READ_ONLY` | Both          | Optional   | Set to `false` to enable write tools (defaults to `true`)                         |
-| `MCP_PUBLIC_URL`            | Remote HTTP   | Yes (HTTP) | Public HTTPS endpoint ending in `/mcp` used by OAuth discovery                    |
-| `MCP_TOKEN_SECRET`          | Remote HTTP   | Yes (HTTP) | At least 32 characters; used to encrypt OAuth tokens with AES-256-GCM             |
-| `PORT`                      | Remote HTTP   | Optional   | Port to listen on (defaults to `3000`)                                            |
+| Variable                    | Applies to                   | Purpose                                                                                      |
+| --------------------------- | ---------------------------- | -------------------------------------------------------------------------------------------- |
+| `AUTHMODE`                  | HTTP                         | `oauth`, `insecure-env`, or `secure-sqlite`; inferred as described above when unset          |
+| `SQUARESPACE_API_KEY`       | Stdio and API-key HTTP modes | Outbound Squarespace credential; not used for OAuth-mode callers                             |
+| `SQUARESPACE_ACCESS_TOKEN`  | Stdio and API-key HTTP modes | Alternative outbound credential; required for webhook operations                             |
+| `SQUARESPACE_MCP_READ_ONLY` | Both transports              | Defaults to `true`; set `false` to expose write tools                                        |
+| `MCP_PUBLIC_URL`            | HTTP                         | Exact public HTTPS endpoint ending in `/mcp`                                                 |
+| `MCP_TOKEN_SECRET`          | OAuth HTTP                   | Required; random 32+ character secret for encrypted OAuth tokens                             |
+| `MCPAPIKEY`                 | `insecure-env` HTTP          | Required inbound MCP bearer key                                                              |
+| `SQLITEDBPATH`              | `secure-sqlite` HTTP         | Defaults to `/data/squarespace-mcp.sqlite`; requires persistent storage                      |
+| `INITAPIKEY`                | `secure-sqlite` HTTP         | Required on first boot; initial inbound admin key                                            |
+| `MASTERENCRYPTIONKEY`       | `OAuthSessionStore` helper   | 32+ character root key for encrypted stored sessions; the HTTP routes do not use this helper |
+| `PORT`                      | HTTP                         | Defaults to `3000`                                                                           |
 
 ---
 

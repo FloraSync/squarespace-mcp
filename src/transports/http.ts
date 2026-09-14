@@ -4,9 +4,11 @@ import { getOAuthProtectedResourceMetadataUrl, mcpAuthRouter } from '@modelconte
 import { requireBearerAuth } from '@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js';
 import { createMcpExpressApp } from '@modelcontextprotocol/sdk/server/express.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import express, { type NextFunction, type Request, type Response } from 'express';
+import express, { type NextFunction, type Request, type RequestHandler, type Response } from 'express';
 import { rateLimit } from 'express-rate-limit';
 
+import { createApiKeyMiddleware } from '../auth/api-key-middleware.js';
+import { createInsecureVerifier, openApiKeyStore, type AuthMode, type ApiKeyStore } from '../auth/api-key-store.js';
 import { SquarespaceOAuthProvider } from '../auth/provider.js';
 import { TokenCodec } from '../auth/token-codec.js';
 import { createSquarespaceMcpServer } from '../mcp/server.js';
@@ -17,7 +19,14 @@ const TOOL_SCOPE = 'mcp:tools';
 
 export type HttpTransportOptions = {
   publicUrl: string;
-  tokenSecret: string;
+  tokenSecret?: string;
+  authMode?: AuthMode;
+  mcpApiKey?: string;
+  apiKeyStore?: ApiKeyStore;
+  databasePath?: string;
+  initApiKey?: string;
+  masterEncryptionKey?: string;
+  credential?: string;
   readOnly: boolean;
   apiBaseUrl?: string;
   fetchImplementation?: FetchImplementation;
@@ -26,13 +35,10 @@ export type HttpTransportOptions = {
 export function createHttpApp(options: HttpTransportOptions) {
   const endpointUrl = normalizeMcpUrl(options.publicUrl);
   const issuerUrl = new URL(endpointUrl.origin);
-  const provider = new SquarespaceOAuthProvider({
-    codec: new TokenCodec(options.tokenSecret),
-    readOnly: options.readOnly,
-    apiBaseUrl: options.apiBaseUrl,
-    fetchImplementation: options.fetchImplementation,
-  });
   const app = createMcpExpressApp({ host: '0.0.0.0' });
+  const authMode: AuthMode = options.authMode ?? 'oauth';
+  let provider: SquarespaceOAuthProvider | undefined;
+  let bearerAuth: RequestHandler;
 
   app.get('/', (_request, response) => {
     response.type('text/plain').send('FloraSync Squarespace MCP server. Connect an MCP client to /mcp.');
@@ -44,7 +50,9 @@ export function createHttpApp(options: HttpTransportOptions) {
     response
       .type('text/plain')
       .send(
-        'This self-hosted server validates Squarespace credentials directly with Squarespace and encrypts them into short-lived MCP tokens. It does not write credentials or Squarespace data to a database.',
+        authMode === 'oauth'
+          ? 'This self-hosted server validates Squarespace credentials directly with Squarespace and encrypts them into short-lived MCP tokens. It does not write credentials or Squarespace data to a database.'
+          : 'This self-hosted server authenticates MCP API keys without logging them. Secure mode stores only bcrypt hashes and encrypted OAuth sessions.',
       );
   });
   app.get('/terms', (_request, response) => {
@@ -55,40 +63,69 @@ export function createHttpApp(options: HttpTransportOptions) {
       );
   });
 
-  app.post(
-    '/oauth/approve',
-    rateLimit({ windowMs: 60_000, limit: 10, standardHeaders: true, legacyHeaders: false }),
-    express.urlencoded({ extended: false, limit: '16kb' }),
-    provider.approvalHandler,
-  );
-
-  app.use(
-    mcpAuthRouter({
-      provider,
-      issuerUrl,
-      resourceServerUrl: endpointUrl,
-      scopesSupported: [TOOL_SCOPE],
-      resourceName: 'FloraSync Squarespace MCP',
-      serviceDocumentationUrl: new URL('https://github.com/FloraSync/squarespace-mcp#readme'),
-      clientRegistrationOptions: { clientIdGeneration: false },
-    }),
-  );
-
-  const bearerAuth = requireBearerAuth({
-    verifier: provider,
-    requiredScopes: [],
-    resourceMetadataUrl: getOAuthProtectedResourceMetadataUrl(endpointUrl),
-  });
+  if (authMode === 'oauth') {
+    if (!options.tokenSecret) throw new Error('MCP_TOKEN_SECRET is required for OAuth HTTP mode.');
+    provider = new SquarespaceOAuthProvider({
+      codec: new TokenCodec(options.tokenSecret),
+      readOnly: options.readOnly,
+      apiBaseUrl: options.apiBaseUrl,
+      fetchImplementation: options.fetchImplementation,
+    });
+    app.post(
+      '/oauth/approve',
+      rateLimit({ windowMs: 60_000, limit: 10, standardHeaders: true, legacyHeaders: false }),
+      express.urlencoded({ extended: false, limit: '16kb' }),
+      provider.approvalHandler,
+    );
+    app.use(
+      mcpAuthRouter({
+        provider,
+        issuerUrl,
+        resourceServerUrl: endpointUrl,
+        scopesSupported: [TOOL_SCOPE],
+        resourceName: 'FloraSync Squarespace MCP',
+        serviceDocumentationUrl: new URL('https://github.com/FloraSync/squarespace-mcp#readme'),
+        clientRegistrationOptions: { clientIdGeneration: false },
+      }),
+    );
+    bearerAuth = requireBearerAuth({
+      verifier: provider,
+      requiredScopes: [],
+      resourceMetadataUrl: getOAuthProtectedResourceMetadataUrl(endpointUrl),
+    });
+  } else if (authMode === 'insecure-env') {
+    if (!options.mcpApiKey) throw new Error('MCPAPIKEY is required for insecure-env HTTP mode.');
+    bearerAuth = createApiKeyMiddleware(createInsecureVerifier(options.mcpApiKey));
+  } else {
+    const apiKeyStore =
+      options.apiKeyStore ??
+      (options.databasePath
+        ? openApiKeyStore({
+            databasePath: options.databasePath,
+            initApiKey: options.initApiKey,
+            masterEncryptionKey: options.masterEncryptionKey,
+          })
+        : undefined);
+    if (!apiKeyStore) throw new Error('A SQLite API-key store is required for secure-sqlite HTTP mode.');
+    if (!options.credential) throw new Error('SQUARESPACE_API_KEY is required for secure-sqlite HTTP mode.');
+    bearerAuth = createApiKeyMiddleware((token) => apiKeyStore.verify(token));
+  }
 
   app.post('/mcp', bearerAuth, express.json({ limit: '20mb' }), async (request: Request, response: Response) => {
     const auth = request.auth;
-    if (!auth) {
+    if (authMode === 'oauth' && !auth) {
       response.status(401).json({ error: 'unauthorized' });
       return;
     }
 
+    const credential =
+      authMode === 'oauth' ? provider?.credentialFromAccessToken(auth?.token ?? '') : options.credential;
+    if (!credential) {
+      response.status(503).json({ error: 'No Squarespace credential is configured for this API key.' });
+      return;
+    }
     const server = createSquarespaceMcpServer({
-      credential: provider.credentialFromAccessToken(auth.token),
+      credential,
       readOnly: options.readOnly,
       apiBaseUrl: options.apiBaseUrl,
       fetchImplementation: options.fetchImplementation,
