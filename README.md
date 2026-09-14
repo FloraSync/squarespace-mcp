@@ -1,80 +1,73 @@
-# Squarespace MCP
+# 🛍️ Squarespace MCP
 
 [![CI](https://github.com/FloraSync/squarespace-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/FloraSync/squarespace-mcp/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/@florasync/squarespace-mcp.svg)](https://www.npmjs.com/package/@florasync/squarespace-mcp)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Node.js](https://img.shields.io/badge/Node.js-%3E%3D20-brightgreen.svg)](https://nodejs.org/)
 
-An MCP server for the current Squarespace Commerce APIs, built for both:
+**Connect your Squarespace store directly to your favorite AI assistants.**
 
-- **Gemini Spark and other web clients** through a hosted HTTPS Streamable HTTP endpoint with OAuth 2.1 discovery, Dynamic Client Registration (DCR), PKCE, and encrypted credential tokens.
-- **Gemini CLI, Claude Desktop, Codex, and local clients** through an npm-installed stdio executable.
+Whether you use **Claude Desktop**, **Cursor**, **Gemini CLI**, or **Gemini Spark**, Squarespace MCP gives your AI the context it needs to answer questions about your store, analyze sales, check stock levels, and manage your catalog—all through simple, natural conversation.
 
-The server exposes **52 operations generated from Squarespace's official OpenAPI schema**. It is read-only by default and never logs Squarespace credentials.
+---
 
-> This project integrates the public Squarespace Commerce APIs. Squarespace does not expose general page, blog post, form, template, or site-design editing through those APIs, so this server does not pretend those operations exist.
+### ✨ What can you ask your AI?
 
-## What it supports
+Once connected, you can ask questions and give instructions in plain English:
 
-| Area             | Capabilities                                                  | Notes                                                            |
-| ---------------- | ------------------------------------------------------------- | ---------------------------------------------------------------- |
-| Website identity | Read website and OAuth member profiles                        | Available to authenticated requests                              |
-| Contacts         | List, query, create, update, delete, and manage address books | Preferred replacement for Profiles                               |
-| Analytics        | Retrieve per-contact transaction summaries                    | Query operation despite using HTTP POST                          |
-| Discounts        | Full CRUD                                                     | GA as of July 2026                                               |
-| Products v2      | Products, variants, product images, image ordering/status     | Physical, service, gift card, and supported download operations  |
-| Inventory        | Read inventory and adjust stock                               | Idempotency key generated automatically when omitted             |
-| Orders           | List, read, import, and fulfill orders                        | API-key order creation has a separate 100/hour limit             |
-| Transactions     | List and retrieve transaction documents                       | Read only                                                        |
-| Profiles         | Read legacy profile data                                      | Squarespace marks this API as maintenance mode                   |
-| Webhooks         | Create, update, test, rotate, and delete subscriptions        | Squarespace requires an OAuth access token; API keys do not work |
+- 📦 **Inventory & Stock**: _"Which product variants are running low on stock?"_ or _"Do we have any out-of-stock items right now?"_
+- 🛍️ **Orders & Fulfillment**: _"Show me all pending orders from this past weekend"_ or _"Check the status of order #10042."_
+- 🏷️ **Discounts & Sales**: _"What discount codes are currently active?"_ or _(with write access)_ _"Create a 15% off discount code 'SPRING15' valid until Friday."_
+- 👥 **Customers & Contacts**: _"Look up customer details for alex@example.com"_ or _"Find our top 10 customers by total spend."_
+- 📈 **Store Performance**: _"Summarize transaction volume and sales for this past month."_
 
-The generated catalog stays below Gemini Enterprise's 100-action guidance and includes MCP safety annotations for read-only and destructive operations.
+> 🛡️ **Safe by Default**: Squarespace MCP starts in **100% read-only mode**. Your AI can look up orders, inventory, and analytics, but it **cannot modify or delete anything** in your store unless you explicitly enable write mode. Your API keys are never logged or stored in any database.
 
-## Gemini Spark: important runtime distinction
+---
 
-Gemini Spark does **not** run an npm command. Its custom Connected Apps UI accepts an HTTPS MCP server URL. Google requires the server to follow the MCP specification and supports DCR or pre-registered OAuth client credentials. See [Google's Spark custom app instructions](https://support.google.com/gemini/answer/17209137) and [Google's Streamable HTTP hosting guidance](https://cloud.google.com/run/docs/host-mcp-servers).
+## 🚀 Quick Start (Choose Your Setup)
 
-That is why this package has two transports:
+Getting started takes less than 3 minutes. Pick how you prefer to use AI:
 
-```text
-Local MCP client ──stdio──> npx @florasync/squarespace-mcp ──Bearer──> Squarespace
+| If you use...          | Recommended Setup                       | How it works                                    |
+| :--------------------- | :-------------------------------------- | :---------------------------------------------- |
+| **Claude Desktop**     | [Claude Desktop Setup](#claude-desktop) | Runs locally on your computer with `npx`        |
+| **Cursor / VS Code**   | [Cursor & IDE Setup](#cursor-setup)     | Runs locally on your computer with `npx`        |
+| **Gemini CLI**         | [Gemini CLI Setup](#gemini-cli)         | Runs locally on your computer with `npx`        |
+| **Gemini Spark** (Web) | [Gemini Spark Setup](#gemini-spark)     | Connects via a hosted HTTPS endpoint with OAuth |
 
-Gemini Spark ──HTTPS/OAuth──> hosted /mcp endpoint ──Bearer──> Squarespace
-                                   │
-                                   └─ user enters their Squarespace key on the consent page
-```
+---
 
-The npm release makes the executable easy to install and pins a known version. A Spark user still needs a deployed copy of its HTTP mode (Cloud Run, another container host, or an equivalent Node host).
+### 🔑 Step 1: Get Your Squarespace API Key
 
-## Prerequisites
+To let your AI interact with your store, create a secure API key:
 
-- Node.js 20 or newer for local use.
-- A Squarespace site on a plan that permits Developer API Keys. Squarespace currently documents custom API-key applications under Commerce Advanced.
-- A key with only the permissions you need. Squarespace API keys do not expire while the site stays active, so store and revoke them carefully.
-- Gemini Spark access for Spark usage. Availability and account restrictions are controlled by Google.
+1. Log in to your [Squarespace Dashboard](https://account.squarespace.com).
+2. Navigate to **Settings** → **Developer Tools** (or **Advanced**) → **Developer API Keys**.
+3. Click **Generate Key**.
+4. Name your key (e.g., `Squarespace MCP AI`).
+5. Choose your permissions:
+   - **Recommended for general use (Read-Only)**: Check **Read** for _Products_, _Inventory_, _Orders_, and _Profiles / Contacts_.
+   - **If you plan to use write actions later**: Check **Read and Write** for the specific areas you want your AI to manage.
+6. Click **Generate Key** and copy the key immediately _(Squarespace will only show it once)_.
 
-Create a Squarespace key under **Settings → Advanced → Developer API Keys**. The key is shown once. See [Squarespace authentication and permissions](https://developers.squarespace.com/commerce-apis/authentication-and-permissions).
+> [!NOTE]
+> Squarespace Developer API Keys are available on plans that support custom commerce integrations (typically Commerce Advanced). Learn more in the [Squarespace Authentication Guide](https://developers.squarespace.com/commerce-apis/authentication-and-permissions).
 
-## Local quick start
+---
 
-Run the pinned npm release with your key in the environment:
+### 💻 Local Desktop Setup (Claude, Cursor, Gemini CLI)
 
-```bash
-SQUARESPACE_API_KEY="your-key" \
-  npx -y @florasync/squarespace-mcp@0.1.0
-```
+Local setups run directly on your computer. You only need **Node.js 20 or newer** installed.
 
-Read-only mode is the default. To expose write operations:
+<a id="claude-desktop"></a>
 
-```bash
-SQUARESPACE_API_KEY="your-key" \
-  npx -y @florasync/squarespace-mcp@0.1.0 --read-write
-```
+#### 🟣 Claude Desktop
 
-An OAuth access token can be supplied as `SQUARESPACE_ACCESS_TOKEN` instead. This is required for webhook subscription operations.
+Add this configuration to your Claude Desktop config file:
 
-### Gemini CLI configuration
-
-Add this to `~/.gemini/settings.json` or the project's `.gemini/settings.json`:
+- **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
+- **Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
 
 ```json
 {
@@ -83,7 +76,31 @@ Add this to `~/.gemini/settings.json` or the project's `.gemini/settings.json`:
       "command": "npx",
       "args": ["-y", "@florasync/squarespace-mcp@0.1.0"],
       "env": {
-        "SQUARESPACE_API_KEY": "$SQUARESPACE_API_KEY"
+        "SQUARESPACE_API_KEY": "YOUR_SQUARESPACE_API_KEY_HERE"
+      }
+    }
+  }
+}
+```
+
+Restart Claude Desktop, and you'll see a hammer icon 🔨 with Squarespace tools ready to use!
+
+---
+
+<a id="gemini-cli"></a>
+
+#### 🔵 Gemini CLI / Antigravity CLI
+
+Add this to `~/.gemini/settings.json` or your project's `.gemini/settings.json`:
+
+```json
+{
+  "mcpServers": {
+    "squarespace": {
+      "command": "npx",
+      "args": ["-y", "@florasync/squarespace-mcp@0.1.0"],
+      "env": {
+        "SQUARESPACE_API_KEY": "YOUR_SQUARESPACE_API_KEY_HERE"
       },
       "timeout": 30000,
       "trust": false
@@ -92,140 +109,219 @@ Add this to `~/.gemini/settings.json` or the project's `.gemini/settings.json`:
 }
 ```
 
-Keep `trust: false` so the client continues to confirm tool calls. Add `"--read-write"` to `args` only when needed.
+---
 
-## Gemini Spark deployment
+<a id="cursor-setup"></a>
 
-### 1. Deploy the container
+#### 🟢 Cursor & IDE Setup
 
-The included `Dockerfile` starts Streamable HTTP mode on `$PORT`. A remote deployment requires:
+In Cursor, open **Settings** → **Features** → **MCP Servers** → **Add New MCP Server**:
 
-| Variable                    | Required | Purpose                                                                                                   |
-| --------------------------- | -------- | --------------------------------------------------------------------------------------------------------- |
-| `MCP_PUBLIC_URL`            | Yes      | Exact public HTTPS endpoint ending in `/mcp`; used in OAuth metadata and resource binding                 |
-| `MCP_TOKEN_SECRET`          | Yes      | At least 32 characters; encrypts DCR metadata, credentials, auth codes, access tokens, and refresh tokens |
-| `SQUARESPACE_MCP_READ_ONLY` | No       | Defaults to `true`; set `false` to publish write tools                                                    |
-| `PORT`                      | No       | HTTP port; defaults to `3000`                                                                             |
+- **Name**: `squarespace`
+- **Type**: `command`
+- **Command**: `npx -y @florasync/squarespace-mcp@0.1.0`
+- **Environment Variables**: `SQUARESPACE_API_KEY=YOUR_SQUARESPACE_API_KEY_HERE`
 
-Build locally:
+Or create `.cursor/mcp.json` in your workspace:
 
-```bash
-docker build -t squarespace-mcp .
-docker run --rm -p 3000:3000 \
-  -e MCP_PUBLIC_URL="http://localhost:3000/mcp" \
-  -e MCP_TOKEN_SECRET="$(openssl rand -base64 32)" \
-  squarespace-mcp
+```json
+{
+  "mcpServers": {
+    "squarespace": {
+      "command": "npx",
+      "args": ["-y", "@florasync/squarespace-mcp@0.1.0"],
+      "env": {
+        "SQUARESPACE_API_KEY": "YOUR_SQUARESPACE_API_KEY_HERE"
+      }
+    }
+  }
+}
 ```
 
-For Google Cloud Run, put `MCP_TOKEN_SECRET` in Secret Manager and deploy publicly at the Cloud Run ingress layer. The application itself requires OAuth on `/mcp`; public ingress is necessary for Spark to reach the OAuth and MCP routes.
+---
+
+#### ⚡ Quick Command-Line Test
+
+You can also run the server directly in your terminal to verify your connection:
 
 ```bash
-gcloud run deploy squarespace-mcp \
-  --source . \
-  --region us-central1 \
-  --allow-unauthenticated \
-  --set-env-vars MCP_PUBLIC_URL=https://replace-after-first-deploy.invalid/mcp,SQUARESPACE_MCP_READ_ONLY=true \
-  --set-secrets MCP_TOKEN_SECRET=squarespace-mcp-token-secret:latest
+SQUARESPACE_API_KEY="your-squarespace-api-key" \
+  npx -y @florasync/squarespace-mcp@0.1.0
 ```
 
-After the first deployment, copy the service URL and update `MCP_PUBLIC_URL` to the exact service URL plus `/mcp`:
+---
 
-```bash
-gcloud run services update squarespace-mcp \
-  --region us-central1 \
-  --set-env-vars MCP_PUBLIC_URL=https://YOUR-SERVICE-URL.run.app/mcp
+<a id="gemini-spark"></a>
+
+### 🌐 Gemini Spark (Web App)
+
+Because [Gemini Spark](https://support.google.com/gemini/answer/17209137) runs in Google's cloud web app, it cannot run `npx` commands on your computer. Instead, it connects via an **HTTPS endpoint** using standard OAuth 2.1 and encrypted credential tokens.
+
+```text
+Local MCP Client (Claude, Cursor) ──stdio──> npx @florasync/squarespace-mcp ──Bearer──> Squarespace API
+
+Gemini Spark (Google Web App)     ──HTTPS──> Hosted Cloud Run Service       ──Bearer──> Squarespace API
+                                                      │
+                                                      └─ User enters Squarespace key on secure web login
 ```
 
-Verify:
+#### How to connect Gemini Spark:
+
+1. **Deploy the container** to Google Cloud Run (takes ~3 minutes, free or pennies/month). Follow our step-by-step [Google Cloud Run Deployment Guide](docs/CLOUD_RUN.md).
+2. In the Gemini web app, go to **Settings & help** → **Connected Apps**.
+3. Under **Custom apps for Spark**, enter your deployed URL (e.g. `https://your-service.run.app/mcp`).
+4. Spark automatically connects and opens a secure authorization page.
+5. Paste your Squarespace API key. The server validates your key directly with Squarespace and you're ready to chat!
+
+---
+
+## ✍️ Enabling Write Mode (Optional)
+
+By default, the server runs in **safe read-only mode**. If you'd like your AI to perform actions like adjusting inventory, creating discounts, or updating products:
+
+- **In CLI / npx**: Add `--read-write` to the command arguments:
+  ```bash
+  SQUARESPACE_API_KEY="your-key" npx -y @florasync/squarespace-mcp@0.1.0 --read-write
+  ```
+- **In client JSON configs**: Add `"--read-write"` to the `"args"` array:
+  ```json
+  "args": ["-y", "@florasync/squarespace-mcp@0.1.0", "--read-write"]
+  ```
+- **In Cloud Run / Remote deployments**: Set the environment variable:
+  ```env
+  SQUARESPACE_MCP_READ_ONLY=false
+  ```
+
+---
+
+## 🧰 What It Supports (52 Operations)
+
+Squarespace MCP provides **52 official operations** generated directly from Squarespace's Commerce OpenAPI specification (24 read-only, 28 write):
+
+| Area                 | Capabilities                                                       | Read-Only Tools                                      | Write Tools (Requires `--read-write`)                  |
+| :------------------- | :----------------------------------------------------------------- | :--------------------------------------------------- | :----------------------------------------------------- |
+| **Products v2**      | Physical, service, and digital products, variants, images, sorting | Browse products, view variants, check image status   | Create/update/delete products, variants, and images    |
+| **Inventory**        | Real-time stock counts and quantity tracking                       | Check stock levels, view variant quantities          | Add, subtract, or set stock levels                     |
+| **Orders**           | Full order lifecycle management                                    | List recent orders, search orders, get order details | Import orders, fulfill orders with tracking info       |
+| **Discounts**        | Promo codes and automated store discounts                          | List active discounts, inspect discount rules        | Create, update, or delete discount codes               |
+| **Contacts**         | Customer directory and address books                               | Query contacts, search by email, view addresses      | Create, update, or remove customer contacts            |
+| **Analytics**        | Customer purchase history and metrics                              | Fetch per-contact transaction summaries              | _(Read-only query)_                                    |
+| **Transactions**     | Financial ledger and payment documents                             | Retrieve transaction documents and settlement info   | _(Read-only)_                                          |
+| **Website Identity** | Site details and authenticated user profile                        | Inspect site metadata and member permissions         | _(Read-only)_                                          |
+| **Profiles**         | Legacy customer profile records                                    | Read legacy profile data                             | _(Read-only)_                                          |
+| **Webhooks**         | Real-time event notifications                                      | List active webhook subscriptions                    | Create, test, rotate secrets, and delete subscriptions |
+
+> [!NOTE]
+> **API Scope Boundary**: This server integrates with Squarespace's official _Commerce APIs_. Squarespace does not offer public APIs for editing general page layouts, blog posts, form blocks, or custom CSS, so those operations are not included.
+
+---
+
+## 🔒 Security & Privacy
+
+We take the security of your store seriously:
+
+- **Never logs credentials**: API keys and tokens are strictly scrubbed from logs and error messages.
+- **No credential database**: The server never stores your API key on disk or in a database.
+- **Process isolation**: In local mode, keys stay in your personal machine's environment.
+- **Industry-standard encryption**: In remote/web mode, credentials and OAuth tokens are encrypted using **AES-256-GCM** with a secret key (`MCP_TOKEN_SECRET`) you control.
+- **Client safety confirmations**: MCP clients (like Claude and Gemini CLI) prompt you before executing actions.
+
+For complete details, please read our [Security Policy](SECURITY.md).
+
+---
+
+## ⚙️ Environment Variables & Options
+
+### Command-Line Flags
+
+| Flag                 | Description                                                | Default                       |
+| :------------------- | :--------------------------------------------------------- | :---------------------------- |
+| `--read-write`       | Enables tools that modify store data                       | `false` (Read-only)           |
+| `--http`             | Starts the remote Streamable HTTP server instead of stdio  | `false`                       |
+| `--port <number>`    | HTTP port to listen on                                     | `3000` (or `$PORT`)           |
+| `--host <string>`    | HTTP host to bind                                          | `0.0.0.0` (or `$HOST`)        |
+| `--public-url <url>` | Public HTTPS endpoint ending in `/mcp` for OAuth discovery | `http://localhost:<port>/mcp` |
+| `-v, --version`      | Display version number                                     |                               |
+| `-h, --help`         | Display help screen                                        |                               |
+
+### Environment Variables
+
+| Variable                    | Transport     | Required?  | Purpose                                                                           |
+| :-------------------------- | :------------ | :--------- | :-------------------------------------------------------------------------------- |
+| `SQUARESPACE_API_KEY`       | Local / Stdio | Yes*       | Your Squarespace Developer API Key (*or use `SQUARESPACE_ACCESS_TOKEN` for OAuth) |
+| `SQUARESPACE_ACCESS_TOKEN`  | Local / Stdio | Optional   | Squarespace OAuth Bearer Token (required for webhook operations)                  |
+| `SQUARESPACE_MCP_READ_ONLY` | Both          | Optional   | Set to `false` to enable write tools (defaults to `true`)                         |
+| `MCP_PUBLIC_URL`            | Remote HTTP   | Yes (HTTP) | Public HTTPS endpoint ending in `/mcp` used by OAuth discovery                    |
+| `MCP_TOKEN_SECRET`          | Remote HTTP   | Yes (HTTP) | At least 32 characters; used to encrypt OAuth tokens with AES-256-GCM             |
+| `PORT`                      | Remote HTTP   | Optional   | Port to listen on (defaults to `3000`)                                            |
+
+---
+
+## 🛠️ Development & Contributing
+
+Contributions and feedback are very welcome!
+
+### Local Development Setup
 
 ```bash
-curl https://YOUR-SERVICE-URL.run.app/healthz
-curl https://YOUR-SERVICE-URL.run.app/.well-known/oauth-protected-resource/mcp
-```
+# Clone the repository
+git clone https://github.com/FloraSync/squarespace-mcp.git
+cd squarespace-mcp
 
-### 2. Connect Spark
-
-1. In the Gemini web app, open **Settings & help → Connected Apps**.
-2. Under **Custom apps for Spark**, add `https://YOUR-SERVICE-URL.run.app/mcp`.
-3. Spark discovers the OAuth metadata and dynamically registers itself.
-4. On the FloraSync authorization page, paste a Squarespace API key or OAuth access token.
-5. The server validates the credential directly against Squarespace and redirects back to Gemini.
-
-The credential is never placed in a query string and is not written to a database. It is encrypted into short-lived, resource-bound bearer tokens with AES-256-GCM. Access tokens last one hour; rotating refresh tokens last up to 30 days.
-
-### Remote security model
-
-This remote mode is designed for a self-hosted deployment:
-
-- Use HTTPS only. The SDK rejects non-HTTPS issuer URLs except localhost development.
-- Keep `MCP_TOKEN_SECRET` stable and secret. Rotating it is the immediate way to invalidate every registration and token.
-- OAuth authorization codes and refresh tokens are one-time-use within a running process. Replay and revocation caches are process-local; if the service restarts, rotate `MCP_TOKEN_SECRET` when immediate global revocation is required.
-- The deployment stores no API key database. A credential is present only in the authorization POST body, server memory, and authenticated encrypted tokens.
-- Keep read-only mode enabled unless the deployment genuinely needs writes.
-- Restrict Cloud Run logs and never add request-body logging middleware.
-
-For a public multi-tenant SaaS offering, replace the self-contained provider with a durable authorization service and persistent revocation store before production use.
-
-## Tool behavior
-
-- Inputs are validated server-side against schemas derived from the official Squarespace OpenAPI document.
-- Required idempotency keys are automatically generated. Supply `idempotencyKey` yourself when intentionally retrying the same inventory adjustment or order import.
-- Pagination cursors are returned unchanged. Pass `cursor` to the same list tool for the next page.
-- Squarespace errors include status, `contextId`, and `Retry-After` details when available; credentials are redacted.
-- Squarespace's global documented limit is 300 requests/minute (five/second). A `429` has a one-minute cooldown. See [rate limits](https://developers.squarespace.com/commerce-apis/rate-limits).
-
-## Development
-
-```bash
+# Install dependencies
 npm ci
-npm run typecheck
-npm run lint
-npm run format:check
-npm run test:coverage
-npm run build
-npm run pack:dry
+
+# Run quality checks
+npm run typecheck       # TypeScript verification
+npm run lint            # ESLint
+npm run format:check    # Prettier style check
+npm test                # Vitest test suite
+npm run test:coverage   # Full coverage report
+npm run build           # Compile to dist/
 ```
 
-Update the generated catalog when Squarespace changes its schema:
+### Keeping in Sync with Squarespace
+
+When Squarespace updates their official Commerce API schema:
 
 ```bash
+# Automatically fetches the latest official OpenAPI schema and regenerates tool definitions
 npm run sync:api
 npm test
 ```
 
-Review the generated diff before committing it. The generator downloads Squarespace's current official schema and produces `src/generated/operations.ts`.
+---
 
-## Releases
+## 🏷️ Releases
 
-Releases are tag-driven. A tag such as `v0.1.0` must exactly match `package.json` and `server.json`. The release workflow:
+Releases are published automatically to npm with cryptographic provenance upon tagging:
 
-1. reruns type checking, formatting, lint, coverage, build, package inspection, and audit;
-2. publishes the public npm package with provenance;
-3. publishes `ghcr.io/florasync/squarespace-mcp:<version>` and `:latest`;
-4. creates a GitHub Release.
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
 
-The initial npm publish needs a granular `NPM_TOKEN` GitHub secret with read/write package access and **Bypass 2FA** enabled. After `0.1.0` exists, configure npm Trusted Publishing for:
+Prebuilt multi-arch Docker images are published to GitHub Container Registry:
 
-- Organization: `FloraSync`
-- Repository: `squarespace-mcp`
-- Workflow filename: `release.yml`
-- Allowed action: `npm publish`
+```bash
+docker pull ghcr.io/florasync/squarespace-mcp:0.1.0
+```
 
-Then remove the long-lived `NPM_TOKEN` and set the package publishing policy to disallow tokens. npm requires Node 22.14+ and npm 11.5.1+ for trusted publishing; this workflow uses Node 24 and npm 11.
+---
 
-`server.json` is ready for publication to the official MCP Registry after the first npm release.
+## 📚 Resources & Links
 
-## Sources and status
+- [Google Cloud Run Deployment Guide](docs/CLOUD_RUN.md)
+- [Security Policy](SECURITY.md)
+- [Squarespace Commerce API Documentation](https://developers.squarespace.com/commerce-apis/overview)
+- [Squarespace Developer API Keys Guide](https://developers.squarespace.com/commerce-apis/authentication-and-permissions)
+- [Model Context Protocol Specification](https://modelcontextprotocol.io/)
+- [Gemini Connected Apps Documentation](https://support.google.com/gemini/answer/17209137)
 
-- [Squarespace Commerce APIs](https://developers.squarespace.com/commerce-apis/overview)
-- [Squarespace authentication and permissions](https://developers.squarespace.com/commerce-apis/authentication-and-permissions)
-- [Squarespace API changelog](https://developers.squarespace.com/commerce-apis/changelog)
-- [Gemini Spark custom apps](https://support.google.com/gemini/answer/17209137)
-- [MCP Streamable HTTP transport](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports)
-- [npm Trusted Publishing](https://docs.npmjs.com/trusted-publishers/)
+---
 
-Squarespace is a trademark of Squarespace, Inc. This project is independently maintained by FloraSync and is not endorsed by Squarespace or Google.
+## 📜 License & Legal
 
-## License
+Distributed under the **MIT License**. See [`LICENSE`](LICENSE) for more information.
 
-MIT
+_Disclaimer: Squarespace is a registered trademark of Squarespace, Inc. Gemini is a trademark of Google LLC. This open-source project is independently maintained by FloraSync and is not officially affiliated with or endorsed by Squarespace or Google._

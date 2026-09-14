@@ -34,6 +34,27 @@ describe('remote HTTP and Gemini Spark OAuth contract', () => {
     });
   });
 
+  it.each([
+    'https://example.com:8443/oauth/callback',
+    'http://127.0.0.1:8765/callback/codex',
+    'https://example.com/callback;script-src%20*?next=https://other.example',
+    'com.example.app:/oauth/callback',
+  ])('keeps credential submission same-origin for callback %s', async (callback) => {
+    const app = createApp();
+    const registered = await register(app, [callback, 'https://unused.example/callback']).expect(201);
+    const authorization = await authorize(app, registered.body.client_id, callback).expect(200);
+    const directives = String(authorization.headers['content-security-policy']).split(/;\s*/);
+    expect(directives.find((directive) => directive.startsWith('form-action '))).toBe("form-action 'self'");
+    expect(directives).toContain("default-src 'none'");
+    expect(directives).toContain("frame-ancestors 'none'");
+  });
+
+  it('rejects an unregistered callback before rendering the consent page', async () => {
+    const app = createApp();
+    const registered = await register(app).expect(201);
+    await authorize(app, registered.body.client_id, 'https://unregistered.example/callback').expect(400);
+  });
+
   it('completes DCR, PKCE authorization, credential validation, token exchange, and MCP initialization', async () => {
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ id: 'website-1' }));
     const app = createApp(fetchMock);
@@ -70,11 +91,18 @@ describe('remote HTTP and Gemini Spark OAuth contract', () => {
       .post('/oauth/approve')
       .type('form')
       .send({ request: pending, credential: 'squarespace-key' })
-      .expect(302);
+      .expect(200);
     expect(fetchMock.mock.calls[0]?.[0]).toBe('https://api.squarespace.com/1.0/authorization/website');
-    const location = approval.headers.location;
-    if (!location) throw new Error('OAuth approval did not provide a redirect location.');
-    const redirect = new URL(location);
+    expect(approval.headers.location).toBeUndefined();
+    expect(approval.headers['cache-control']).toBe('no-store');
+    expect(approval.headers['referrer-policy']).toBe('no-referrer');
+    const policy = String(approval.headers['content-security-policy']);
+    const nonce = policy.match(/script-src 'nonce-([^']+)'/)?.[1];
+    expect(nonce).toBeTruthy();
+    expect(policy).toContain("form-action 'none'");
+    expect(approval.text).toContain(`<script nonce="${nonce}">window.location.replace(`);
+    expect(approval.text).not.toContain('squarespace-key');
+    const redirect = completionRedirect(approval.text);
     expect(redirect.searchParams.get('state')).toBe('spark-state');
     const code = redirect.searchParams.get('code');
     expect(code).toBeTruthy();
@@ -147,6 +175,22 @@ describe('remote HTTP and Gemini Spark OAuth contract', () => {
       .expect(400);
   });
 
+  it('escapes callback state in the completion page while preserving its value', async () => {
+    const app = createApp(vi.fn<typeof fetch>().mockResolvedValue(Response.json({ id: 'website-1' })));
+    const registered = await register(app).expect(201);
+    const state = '</script><script>alert("injected")</script>&next=other';
+    const authorization = await authorize(app, registered.body.client_id).query({ state }).expect(200);
+    const pending = authorization.text.match(/name="request" value="([^"]+)"/)?.[1];
+    const approval = await request(app)
+      .post('/oauth/approve')
+      .type('form')
+      .send({ request: pending, credential: 'squarespace-key' })
+      .expect(200);
+    expect(approval.text).not.toContain(state);
+    expect(approval.text.match(/<script\b/g)).toHaveLength(1);
+    expect(completionRedirect(approval.text).searchParams.get('state')).toBe(state);
+  });
+
   it('rejects unauthenticated MCP requests and invalid Squarespace credentials', async () => {
     const fetchMock = vi
       .fn<typeof fetch>()
@@ -162,6 +206,7 @@ describe('remote HTTP and Gemini Spark OAuth contract', () => {
       .type('form')
       .send({ request: pending, credential: 'bad-key' })
       .expect(200);
+    expect(approval.headers['content-security-policy']).toBe(authorization.headers['content-security-policy']);
     expect(approval.text).toContain('Squarespace rejected that credential');
     expect(approval.text).not.toContain('bad-key');
   });
@@ -172,6 +217,7 @@ describe('remote HTTP and Gemini Spark OAuth contract', () => {
     const authorization = await authorize(app, registered.body.client_id);
     const pending = authorization.text.match(/name="request" value="([^"]+)"/)?.[1];
     const missing = await request(app).post('/oauth/approve').type('form').send({ request: pending }).expect(200);
+    expect(missing.headers['content-security-policy']).toBe(authorization.headers['content-security-policy']);
     expect(missing.text).toContain('Enter a Squarespace API key');
     await request(app).post('/oauth/approve').type('form').send({ request: 'expired', credential: 'key' }).expect(400);
   });
@@ -212,26 +258,32 @@ function createApp(fetchImplementation: typeof fetch = vi.fn<typeof fetch>()) {
   });
 }
 
-function register(app: ReturnType<typeof createHttpApp>) {
+function register(app: ReturnType<typeof createHttpApp>, redirectUris = [redirectUri]) {
   return request(app)
     .post('/register')
     .send({
       client_name: 'Gemini Spark test',
-      redirect_uris: [redirectUri],
+      redirect_uris: redirectUris,
       grant_types: ['authorization_code'],
       response_types: ['code'],
       token_endpoint_auth_method: 'none',
     });
 }
 
-function authorize(app: ReturnType<typeof createHttpApp>, clientId: string) {
+function authorize(app: ReturnType<typeof createHttpApp>, clientId: string, callback = redirectUri) {
   return request(app).get('/authorize').query({
     response_type: 'code',
     client_id: clientId,
-    redirect_uri: redirectUri,
+    redirect_uri: callback,
     code_challenge: challenge,
     code_challenge_method: 'S256',
     scope: 'mcp:tools',
     resource: publicUrl,
   });
+}
+
+function completionRedirect(html: string): URL {
+  const target = html.match(/id="oauth-continue" href="([^"]+)"/)?.[1];
+  if (!target) throw new Error('OAuth approval did not provide a continuation link.');
+  return new URL(target.replaceAll('&amp;', '&'));
 }

@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 
 import {
   AccessDeniedError,
@@ -217,7 +217,7 @@ export class SquarespaceOAuthProvider implements OAuthServerProvider {
     const redirect = new URL(pending.params.redirectUri);
     redirect.searchParams.set('code', code);
     if (pending.params.state) redirect.searchParams.set('state', pending.params.state);
-    response.redirect(redirect.toString());
+    sendAuthorizationCompletePage(response, redirect);
   }
 
   private issueTokens(clientId: string, credential: string, scopes: string[], resource?: string): OAuthTokens {
@@ -323,6 +323,28 @@ ${options.error ? `<p class="error">${escapeHtml(options.error)}</p>` : ''}
 <form method="post" action="/oauth/approve"><input type="hidden" name="request" value="${escapeHtml(options.pending)}">
 <label for="credential">Squarespace API key or OAuth access token</label><input id="credential" name="credential" type="password" required maxlength="4096" autocomplete="off" spellcheck="false">
 <button type="submit">Validate and connect</button></form><small>Only use a server deployment you trust. You can revoke the key in Squarespace at any time.</small></main></body></html>`);
+}
+
+function sendAuthorizationCompletePage(response: Response, redirect: URL): void {
+  const nonce = randomBytes(18).toString('base64');
+  const callbackUrl = redirect.toString();
+  const scriptUrl = JSON.stringify(callbackUrl).replace(/</g, '\\u003c');
+  response.status(200);
+  response.setHeader('Content-Type', 'text/html; charset=utf-8');
+  response.setHeader('Cache-Control', 'no-store');
+  response.setHeader('Referrer-Policy', 'no-referrer');
+  response.setHeader(
+    'Content-Security-Policy',
+    `default-src 'none'; script-src 'nonce-${nonce}'; form-action 'none'; base-uri 'none'; frame-ancestors 'none'`,
+  );
+  // Finish the form submission here so its CSP does not follow the client's redirect chain.
+  response.send(`<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Authorization complete</title></head><body>
+<h1>Authorization complete</h1><p>Returning to your app. If nothing happens, use the link below.</p>
+<a id="oauth-continue" href="${escapeHtml(callbackUrl)}" rel="noreferrer">Continue to your app</a>
+<script nonce="${nonce}">window.location.replace(${scriptUrl});</script>
+</body></html>`);
 }
 
 function escapeHtml(value: string): string {
